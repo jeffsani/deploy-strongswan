@@ -23,10 +23,11 @@ if [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then
   apt-get update
   apt-get install -y build-essential libgmp-dev libssl-dev iptables iproute2 wget bzip2 tar
 
-  # UFW NetFlow Gateway Forwarding Logic
+  # UFW NetFlow Gateway Forwarding & IPsec Logic
   if command -v ufw >/dev/null 2>&1; then
-    echo "Configuring UFW to ALLOW default transit forwarding..."
+    echo "Configuring UFW to ALLOW default transit forwarding and IPsec..."
     sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+    ufw allow 500,4500/udp || true
     ufw reload || true
   fi
 
@@ -34,9 +35,11 @@ elif [[ "$OS_ID" == "ol" || "$OS_ID" == "rhel" || "$OS_ID" == "rocky" || "$OS_ID
   # Oracle Linux 9 / RHEL 9 Path
   dnf install -y gcc make gmp-devel openssl-devel iptables iproute wget bzip2 tar
 
-  # Firewalld NetFlow Gateway Forwarding Logic
+  # Firewalld NetFlow Gateway Forwarding & IPsec Logic
   if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
-    echo "Configuring Firewalld to ALLOW transit forwarding..."
+    echo "Configuring Firewalld to ALLOW transit forwarding and IPsec..."
+    firewall-cmd --permanent --add-port=500/udp 2>/dev/null || true
+    firewall-cmd --permanent --add-port=4500/udp 2>/dev/null || true
     firewall-cmd --permanent --add-forward-port=port=500:proto=udp:toport=500 2>/dev/null || true
     firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -j ACCEPT 2>/dev/null || true
     firewall-cmd --reload || true
@@ -96,6 +99,7 @@ conn %default
   authby=secret
   dpdaction=restart
   closeaction=restart
+  keyingtries=%forever
 
 conn strongSwan-vpn-1
   auto=start
@@ -201,9 +205,7 @@ iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387
 
 # ─── 10. Boot strongSwan Daemon ───
-# Dynamically find the ipsec binary in the system PATH
 IPSEC_BIN=$(command -v ipsec || echo "/usr/local/sbin/ipsec")
-
 $IPSEC_BIN restart
 
 # ─── 11. Synchronous Operational Health Check Gate ───
