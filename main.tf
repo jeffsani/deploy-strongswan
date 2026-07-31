@@ -35,11 +35,6 @@ locals {
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 4}/${local.prefix}",
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 6}/${local.prefix}"
   ]
-
-  # Cloudflare strict format: <label>.<account>.custom.ipsec.cloudflare.com
-  custom_fqdns = [
-    for i in range(var.num_of_tunnels) : "vpn${i + 1}.${var.cloudflare_account_id}.custom.ipsec.cloudflare.com"
-  ]
 }
 
 # Generate secure PSKs dynamically
@@ -56,42 +51,38 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   account_id          = var.cloudflare_account_id
   name                = "strongSwan-vpn-${count.index + 1}"
   description         = count.index < 2 ? "Primary ISP to Anycast ${count.index % 2 + 1}" : "Secondary ISP to Anycast ${count.index % 2 + 1}"
-  customer_endpoint   = count.index < 2 ? var.remote_wan_ip_1 : var.remote_wan_ip_2
-  cloudflare_endpoint = count.index % 2 == 0 ? var.cloudflare_anycast_ip_1 : var.cloudflare_anycast_ip_2
+  
+  # Defend against UI newlines natively using trimspace
+  customer_endpoint   = count.index < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
+  cloudflare_endpoint = count.index % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
   interface_address   = local.tunnel_ips[count.index]
   psk                 = random_password.psk[count.index].result
-
-  # Native nested block for Custom Identities
-  custom_remote_identities = {
-  fqdn_id = local.custom_fqdns[count.index]
-  }
 
   health_check = {
     enabled   = true
     type      = "request"
     direction = "unidirectional"
     rate      = "mid"
-    target    = { saved = try(var.health_check_targets[count.index], count.index < 2 ? var.remote_wan_ip_1 : var.remote_wan_ip_2) }
+    target    = { saved = try(var.health_check_targets[count.index], count.index < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)) }
   }
 }
 
 # Remote execution on the instance
 resource "null_resource" "strongswan_install" {
   triggers = {
-    remote_ip   = var.remote_wan_ip_1
+    remote_ip   = trimspace(var.remote_wan_ip_1)
     ssh_user    = var.ssh_user
     private_key = var.ssh_private_key
     
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
       num_of_tunnels  = var.num_of_tunnels
-      remote_wan_ip_1 = var.remote_wan_ip_1
-      remote_wan_ip_2 = var.remote_wan_ip_2 != null ? var.remote_wan_ip_2 : ""
+      remote_wan_ip_1 = trimspace(var.remote_wan_ip_1)
+      remote_wan_ip_2 = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
-          fqdn      = local.custom_fqdns[i]
           psk       = random_password.psk[i].result
-          local_ip  = i < 2 ? var.remote_wan_ip_1 : var.remote_wan_ip_2
-          remote_ip = i % 2 == 0 ? var.cloudflare_anycast_ip_1 : var.cloudflare_anycast_ip_2
+          local_ip  = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
+          remote_ip = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
           vti_if    = "vti${i}"
           mark      = 41 + i
         }
@@ -109,14 +100,13 @@ resource "null_resource" "strongswan_install" {
   provisioner "file" {
     content = templatefile("${path.module}/templates/strongswan.sh.tpl", {
       num_of_tunnels  = var.num_of_tunnels
-      remote_wan_ip_1 = var.remote_wan_ip_1
-      remote_wan_ip_2 = var.remote_wan_ip_2 != null ? var.remote_wan_ip_2 : ""
+      remote_wan_ip_1 = trimspace(var.remote_wan_ip_1)
+      remote_wan_ip_2 = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
-          fqdn      = local.custom_fqdns[i]
           psk       = random_password.psk[i].result
-          local_ip  = i < 2 ? var.remote_wan_ip_1 : var.remote_wan_ip_2
-          remote_ip = i % 2 == 0 ? var.cloudflare_anycast_ip_1 : var.cloudflare_anycast_ip_2
+          local_ip  = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
+          remote_ip = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
           vti_if    = "vti${i}"
           mark      = 41 + i
         }
@@ -131,7 +121,6 @@ resource "null_resource" "strongswan_install" {
     ]
   }
 
-  # Ensure all 4 potential VTI interfaces are cleaned up on destroy
   provisioner "remote-exec" {
     when = destroy
     inline = [
