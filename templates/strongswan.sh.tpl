@@ -114,10 +114,10 @@ conn strongSwan-vpn-1
   leftid=${tunnel_1_id}.${cloudflare_account_id}.ipsec.cloudflare.com
   leftsubnet=0.0.0.0/0
   right=${cf_anycast_1}
-  rightid=${cf_anycast_1}/32
+  rightid=${cf_anycast_1}
   rightsubnet=0.0.0.0/0
   rightauth=psk
-  ike=aes256-sha256-ecp384-ke1_mlkem768!
+  ike=aes256gcm16-sha256-ecp384-ke1_mlkem768!
   esp=aes256gcm16-ecp384!
   replay_window=0
   mark_in=41
@@ -133,10 +133,10 @@ conn strongSwan-vpn-2
   leftid=${tunnel_2_id}.${cloudflare_account_id}.ipsec.cloudflare.com
   leftsubnet=0.0.0.0/0
   right=${cf_anycast_2}
-  rightid=${cf_anycast_2}/32
+  rightid=${cf_anycast_2}
   rightsubnet=0.0.0.0/0
   rightauth=psk
-  ike=aes256-sha256-ecp384-ke1_mlkem768!
+  ike=aes256gcm16-sha256-ecp384-ke1_mlkem768!
   esp=aes256gcm16-ecp384!
   replay_window=0
   mark_in=42
@@ -146,8 +146,8 @@ EOF
 
 # ─── 6. Configure /etc/ipsec.secrets ───
 cat > /etc/ipsec.secrets << 'EOF'
-${tunnel_1_id}.${cloudflare_account_id}.ipsec.cloudflare.com ${cf_anycast_1}/32 : PSK "${psk_1}"
-${tunnel_2_id}.${cloudflare_account_id}.ipsec.cloudflare.com ${cf_anycast_2}/32 : PSK "${psk_2}"
+${tunnel_1_id}.${cloudflare_account_id}.ipsec.cloudflare.com : PSK "${psk_1}"
+${tunnel_2_id}.${cloudflare_account_id}.ipsec.cloudflare.com : PSK "${psk_2}"
 EOF
 
 # ─── 7. Define Explicit Policy Routing Table ───
