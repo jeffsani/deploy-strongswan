@@ -1,6 +1,6 @@
-# Cloudflare Magic WAN Post-Quantum IPsec Deployment
+# Cloudflare Magic WAN Post-Quantum IPsec Deployment with strongSwan
 
-This Terraform module automates the deployment of 2 or 4 Cloudflare Magic WAN IPsec tunnels to a remote Linux instance (Ubuntu, Debian, RHEL, or Oracle Linux). It securely negotiates hybrid post-quantum cryptography (ML-KEM / ECP384) with strict AES-GCM Phase 1 and Phase 2 encryption.
+This Terraform module automates the deployment of 2 or 4 Cloudflare Magic WAN IPsec tunnels to a remote Linux instance (Ubuntu, Debian, RHEL, or Oracle Linux). It securely negotiates hybrid post-quantum cryptography (ML-KEM / ECP384) with strict AES-GCM Phase 1 and Phase 2 encryption using **[strongSwan v6+](https://strongswan.org/)**.
 
 ## Architecture
 
@@ -8,7 +8,7 @@ This deployment supports dynamic scaling based on your ISP links:
 *   **2 Tunnels:** For a single public WAN connection, establishing primary and secondary Anycast connections.
 *   **4 Tunnels:** For dual public WAN connections (discrete ISP links), establishing redundant connections across both WANs.
 
-The deployment handles all inner VTI (Virtual Tunnel Interface) routing, TCP MSS clamping, and kernel-level IP forwarding dynamically.
+The deployment handles all inner VTI (Virtual Tunnel Interface) routing, TCP MSS clamping, and kernel-level IP forwarding dynamically. Because post-quantum cryptography requires strongSwan v6+, the remote execution script automatically downloads, compiles, and installs the latest strongSwan 6 release from source.
 
 ## Prerequisites
 
