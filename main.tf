@@ -15,7 +15,13 @@ terraform {
   }
 }
 
-# Generate secure PSKs internally
+# Automatically fall back to ubuntu_wan_ip if targets are omitted
+locals {
+  t1_target = coalesce(var.tunnel_1_health_check_target, var.ubuntu_wan_ip)
+  t2_target = coalesce(var.tunnel_2_health_check_target, var.ubuntu_wan_ip)
+}
+
+# Generate secure PSKs internally inside Terraform
 resource "random_password" "psk_1" {
   length  = 32
   special = false
@@ -26,7 +32,7 @@ resource "random_password" "psk_2" {
   special = false
 }
 
-# Cloudflare Magic WAN Tunnels
+# Cloudflare Magic WAN / Transit Tunnels
 resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
   account_id          = var.cloudflare_account_id
   name                = "ubuntu-tunnel-1"
@@ -40,7 +46,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
     type      = "request"
     direction = "bidirectional"
     rate      = "mid"
-    target    = { saved = var.tunnel_1_health_check_target }
+    target    = { saved = local.t1_target }
   }
 }
 
@@ -57,7 +63,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
     type      = "request"
     direction = "bidirectional"
     rate      = "mid"
-    target    = { saved = var.tunnel_2_health_check_target }
+    target    = { saved = local.t2_target }
   }
 }
 
@@ -68,8 +74,8 @@ resource "null_resource" "strongswan_install" {
       ubuntu_wan_ip       = var.ubuntu_wan_ip
       cf_anycast_1        = var.cloudflare_anycast_ip_1
       cf_anycast_2        = var.cloudflare_anycast_ip_2
-      tunnel_1_inner_ip   = var.tunnel_1_health_check_target
-      tunnel_2_inner_ip   = var.tunnel_2_health_check_target
+      tunnel_1_inner_ip   = local.t1_target
+      tunnel_2_inner_ip   = local.t2_target
       psk_1               = random_password.psk_1.result
       psk_2               = random_password.psk_2.result
     }))
@@ -87,8 +93,8 @@ resource "null_resource" "strongswan_install" {
       ubuntu_wan_ip       = var.ubuntu_wan_ip
       cf_anycast_1        = var.cloudflare_anycast_ip_1
       cf_anycast_2        = var.cloudflare_anycast_ip_2
-      tunnel_1_inner_ip   = var.tunnel_1_health_check_target
-      tunnel_2_inner_ip   = var.tunnel_2_health_check_target
+      tunnel_1_inner_ip   = local.t1_target
+      tunnel_2_inner_ip   = local.t2_target
       psk_1               = random_password.psk_1.result
       psk_2               = random_password.psk_2.result
     })
