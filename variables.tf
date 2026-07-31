@@ -3,6 +3,15 @@ variable "cloudflare_anycast_ip_1" { type = string }
 variable "cloudflare_anycast_ip_2" { type = string }
 variable "ubuntu_wan_ip" { type = string }
 
+variable "ssh_user" { 
+  type    = string
+  default = "root" 
+}
+variable "ssh_private_key" { 
+  type      = string
+  sensitive = true 
+}
+
 # --- Tunnel Endpoints ---
 variable "tunnel_1_interface_address" { 
   type        = string
