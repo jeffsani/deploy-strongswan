@@ -145,9 +145,10 @@ conn strongSwan-vpn-2
 EOF
 
 # ─── 6. Configure /etc/ipsec.secrets ───
+# The @ symbol prevents strongSwan from failing DNS resolution on the FQDN strings
 cat > /etc/ipsec.secrets << 'EOF'
-${tunnel_1_id}.${cloudflare_account_id}.ipsec.cloudflare.com : PSK "${psk_1}"
-${tunnel_2_id}.${cloudflare_account_id}.ipsec.cloudflare.com : PSK "${psk_2}"
+@${tunnel_1_id}.${cloudflare_account_id}.ipsec.cloudflare.com : PSK "${psk_1}"
+@${tunnel_2_id}.${cloudflare_account_id}.ipsec.cloudflare.com : PSK "${psk_2}"
 EOF
 
 # ─── 7. Define Explicit Policy Routing Table ───
