@@ -28,14 +28,8 @@ variable "num_of_tunnels" {
   default     = 2
 }
 
-variable "tunnel_1_health_check_target" { 
-  type        = string
-  description = "The Customer side health check target. Defaults to ubuntu_wan_ip if omitted."
-  default     = null
-}
-
-variable "tunnel_2_health_check_target" { 
-  type        = string
-  description = "The Customer side health check target. Defaults to ubuntu_wan_ip if omitted."
-  default     = null
+variable "health_check_targets" {
+  type        = list(string)
+  description = "Optional list of custom health check target IPs (e.g., internal IPs for NAT scenarios). If an index is omitted, it defaults to the respective remote WAN IP."
+  default     = []
 }
