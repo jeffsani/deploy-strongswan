@@ -40,6 +40,9 @@ sudo ufw allow 500,4500/udp
 # Allow IPsec ESP (Encapsulating Security Payload) protocol
 sudo ufw allow to any proto esp
 
+# Allow Cloudflare Health Check Probes
+sudo ufw allow proto icmp
+
 # Enable the firewall (Type 'y' when warned about disrupting SSH)
 sudo ufw enable
 
