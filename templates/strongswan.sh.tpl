@@ -2,7 +2,6 @@
 set -o errexit
 set -o nounset
 
-# Ensure all standard and local binary paths are explicitly available to the script
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 echo "Starting Post-Quantum IPsec Tunnel Deployment..."
@@ -19,11 +18,9 @@ fi
 echo "Detected OS: $OS_ID"
 
 if [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then
-  # Ubuntu / Debian Path
   apt-get update
   apt-get install -y build-essential libgmp-dev libssl-dev iptables iproute2 wget bzip2 tar
 
-  # UFW NetFlow Gateway Forwarding & IPsec Logic
   if command -v ufw >/dev/null 2>&1; then
     echo "Configuring UFW to ALLOW default transit forwarding and IPsec..."
     sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
@@ -32,10 +29,8 @@ if [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then
   fi
 
 elif [[ "$OS_ID" == "ol" || "$OS_ID" == "rhel" || "$OS_ID" == "rocky" || "$OS_ID" == "almalinux" || "$OS_ID" == "centos" ]]; then
-  # Oracle Linux 9 / RHEL 9 Path
   dnf install -y gcc make gmp-devel openssl-devel iptables iproute wget bzip2 tar
 
-  # Firewalld NetFlow Gateway Forwarding & IPsec Logic
   if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
     echo "Configuring Firewalld to ALLOW transit forwarding and IPsec..."
     firewall-cmd --permanent --add-port=500/udp 2>/dev/null || true
@@ -51,14 +46,14 @@ else
   exit 1
 fi
 
-# ─── 2. Kernel IP Forwarding (NetFlow Gateway Requirement) ───
+# ─── 2. Kernel IP Forwarding ───
 echo "Enabling Kernel IP Forwarding..."
 sysctl -w net.ipv4.ip_forward=1
 if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
   echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 fi
 
-# ─── 3. Compile strongSwan 6 from Source (with ML-KEM Support) ───
+# ─── 3. Compile strongSwan 6 from Source ───
 echo "Compiling strongSwan 6..."
 cd /tmp
 wget -q https://download.strongswan.org/strongswan-6.0.7.tar.bz2
@@ -73,15 +68,20 @@ cd /tmp
 rm -rf strongswan-6.0.7 strongswan-6.0.7.tar.bz2
 
 # ─── 4. Configure /etc/strongswan.conf ───
-# Dynamically locate the specific network interface bound to your public WAN IP
-WAN_IF=$(ip -o addr show | grep "${remote_wan_ip}" | awk '{print $2}' | head -n 1)
+WAN_IF_1=$(ip -o addr show | grep "${remote_wan_ip_1}" | awk '{print $2}' | head -n 1)
+%{ if num_of_tunnels == 4 ~}
+WAN_IF_2=$(ip -o addr show | grep "${remote_wan_ip_2}" | awk '{print $2}' | head -n 1)
+INTERFACES="$${WAN_IF_1},$${WAN_IF_2}"
+%{ else ~}
+INTERFACES="$${WAN_IF_1}"
+%{ endif ~}
 
 cat > /etc/strongswan.conf << EOF
 charon {
   load_modular = yes
   install_routes = no
   install_virtual_ip = no
-  interfaces_use = $${WAN_IF}
+  interfaces_use = $${INTERFACES}
   plugins {
     include strongswan.d/charon/*.conf
   }
@@ -105,50 +105,34 @@ conn %default
   closeaction=restart
   keyingtries=%forever
 
-conn strongSwan-vpn-1
+%{ for i, t in tunnels ~}
+conn strongSwan-vpn-${i+1}
   auto=start
   type=tunnel
   fragmentation=yes
   leftauth=psk
-  left=${remote_wan_ip}
-  leftid=${tunnel_1_id}.${cloudflare_account_id}.ipsec.cloudflare.com
+  left=${t.local_ip}
+  leftid=${t.fqdn}
   leftsubnet=0.0.0.0/0
-  right=${cf_anycast_1}
-  rightid=${cf_anycast_1}
+  right=${t.remote_ip}
+  rightid=${t.remote_ip}
   rightsubnet=0.0.0.0/0
   rightauth=psk
   ike=aes256gcm16-sha256-ecp384-ke1_mlkem768!
   esp=aes256gcm16-ecp384!
   replay_window=0
-  mark_in=41
-  mark_out=41
+  mark_in=${t.mark}
+  mark_out=${t.mark}
   leftupdown=/etc/strongswan.d/ipsec-vti.sh
 
-conn strongSwan-vpn-2
-  auto=start
-  type=tunnel
-  fragmentation=yes
-  leftauth=psk
-  left=${remote_wan_ip}
-  leftid=${tunnel_2_id}.${cloudflare_account_id}.ipsec.cloudflare.com
-  leftsubnet=0.0.0.0/0
-  right=${cf_anycast_2}
-  rightid=${cf_anycast_2}
-  rightsubnet=0.0.0.0/0
-  rightauth=psk
-  ike=aes256gcm16-sha256-ecp384-ke1_mlkem768!
-  esp=aes256gcm16-ecp384!
-  replay_window=0
-  mark_in=42
-  mark_out=42
-  leftupdown=/etc/strongswan.d/ipsec-vti.sh
+%{ endfor ~}
 EOF
 
 # ─── 6. Configure /etc/ipsec.secrets ───
-# The @ symbol prevents strongSwan from failing DNS resolution on the FQDN strings
 cat > /etc/ipsec.secrets << 'EOF'
-@${tunnel_1_id}.${cloudflare_account_id}.ipsec.cloudflare.com : PSK "${psk_1}"
-@${tunnel_2_id}.${cloudflare_account_id}.ipsec.cloudflare.com : PSK "${psk_2}"
+%{ for t in tunnels ~}
+@${t.fqdn} : PSK "${t.psk}"
+%{ endfor ~}
 EOF
 
 # ─── 7. Define Explicit Policy Routing Table ───
@@ -164,14 +148,15 @@ set -o nounset
 set -o errexit
 
 case "$${PLUTO_CONNECTION}" in
-  *vpn-1*)
-    VTI_IF="vti0"
+%{ for i, t in tunnels ~}
+  *vpn-${i+1}*)
+    VTI_IF="${t.vti_if}"
+    LOCAL_WAN_IP="${t.local_ip}"
     ;;
-  *vpn-2*)
-    VTI_IF="vti1"
-    ;;
+%{ endfor ~}
   *)
     VTI_IF="vti0"
+    LOCAL_WAN_IP="${remote_wan_ip_1}"
     ;;
 esac
 
@@ -179,21 +164,23 @@ case "$${PLUTO_VERB}" in
   up-client)
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
-    ip addr add ${remote_wan_ip}/32 dev "$${VTI_IF}"
+    ip addr add $${LOCAL_WAN_IP}/32 dev "$${VTI_IF}"
     
     sysctl -w "net.ipv4.conf.$${VTI_IF}.disable_policy=1"
     sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
     sysctl -w "net.ipv4.conf.all.rp_filter=0"
     
-    ip rule add from ${remote_wan_ip} lookup viatunicmp 2>/dev/null || true
+    ip rule add from $${LOCAL_WAN_IP} lookup viatunicmp 2>/dev/null || true
     ip route add default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
     ;;
   down-client)
     ip tunnel del "$${VTI_IF}"
     ip route del default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
     
-    if [ ! -d /sys/class/net/vti0 ] && [ ! -d /sys/class/net/vti1 ]; then
-      ip rule del from ${remote_wan_ip} lookup viatunicmp 2>/dev/null || true
+    # Intelligently delete the routing rule ONLY if no other active tunnels are using this IP
+    ACTIVE_VTIS=$(ip tunnel show 2>/dev/null | grep -c "local $${LOCAL_WAN_IP}" || true)
+    if [ "$ACTIVE_VTIS" -eq 0 ]; then
+      ip rule del from $${LOCAL_WAN_IP} lookup viatunicmp 2>/dev/null || true
     fi
     ;;
 esac
@@ -213,12 +200,11 @@ iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss
 IPSEC_BIN=$(command -v ipsec || echo "/usr/local/sbin/ipsec")
 $IPSEC_BIN restart
 
-# Give the daemon 2 seconds to bind to the restricted interface
 sleep 2
 
-# Force immediate active initiation
-$IPSEC_BIN up strongSwan-vpn-1 --asynchronous || true
-$IPSEC_BIN up strongSwan-vpn-2 --asynchronous || true
+%{ for i, t in tunnels ~}
+$IPSEC_BIN up strongSwan-vpn-${i+1} --asynchronous || true
+%{ endfor ~}
 
 # ─── 11. Synchronous Operational Health Check Gate ───
 echo "============================================================"
@@ -231,11 +217,17 @@ ELAPSED=0
 
 while [ $ELAPSED -lt $TIMEOUT ]; do
   CURRENT_STATUS=$($IPSEC_BIN status 2>&1 || true)
+  ALL_ESTABLISHED=true
   
-  if echo "$CURRENT_STATUS" | grep -q "strongSwan-vpn-1.*ESTABLISHED" && \
-     echo "$CURRENT_STATUS" | grep -q "strongSwan-vpn-2.*ESTABLISHED"; then
+  %{ for i, t in tunnels ~}
+  if ! echo "$CURRENT_STATUS" | grep -q "strongSwan-vpn-${i+1}.*ESTABLISHED"; then
+    ALL_ESTABLISHED=false
+  fi
+  %{ endfor ~}
+
+  if [ "$ALL_ESTABLISHED" = true ]; then
     echo "------------------------------------------------------------"
-    echo "SUCCESS: Both Post-Quantum tunnels are securely ESTABLISHED!"
+    echo "SUCCESS: All Post-Quantum tunnels are securely ESTABLISHED!"
     echo "------------------------------------------------------------"
     $IPSEC_BIN status
     exit 0
