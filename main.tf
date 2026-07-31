@@ -62,9 +62,9 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   psk                 = random_password.psk[count.index].result
 
   # Native nested block for Custom Identities
-  custom_remote_identities = [{
-    fqdn_id = local.custom_fqdns[count.index]
-  }]
+  custom_remote_identities = {
+  fqdn_id = local.custom_fqdns[count.index]
+  }
 
   health_check = {
     enabled   = true
