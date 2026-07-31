@@ -11,12 +11,10 @@ wget -q https://download.strongswan.org/strongswan-6.0.7.tar.bz2
 tar -xjf strongswan-6.0.7.tar.bz2
 cd strongswan-6.0.7
 
-# Enable OpenSSL backend alongside the native post-quantum ML plugin
 ./configure --prefix=/usr --sysconfdir=/etc --enable-ml --enable-openssl
 make -j$(nproc)
 make install
 
-# Clean up compilation workspace
 cd /tmp
 rm -rf strongswan-6.0.7 strongswan-6.0.7.tar.bz2
 
@@ -48,7 +46,7 @@ conn %default
   dpdaction=restart
   closeaction=restart
 
-conn cloudflare-tunnel-1
+conn strongSwan-vpn-1
   auto=start
   type=tunnel
   fragmentation=yes
@@ -67,7 +65,7 @@ conn cloudflare-tunnel-1
   mark_out=41
   leftupdown=/etc/strongswan.d/ipsec-vti.sh
 
-conn cloudflare-tunnel-2
+conn strongSwan-vpn-2
   auto=start
   type=tunnel
   fragmentation=yes
@@ -105,11 +103,12 @@ cat > /etc/strongswan.d/ipsec-vti.sh << 'VTISCRIPT'
 set -o nounset
 set -o errexit
 
+# Evaluates the strongSwan system environment identifier
 case "$${PLUTO_CONNECTION}" in
-  *tunnel-1*)
+  *vpn-1*)
     VTI_IF="vti0"
     ;;
-  *tunnel-2*)
+  *vpn-2*)
     VTI_IF="vti1"
     ;;
   *)
