@@ -2,7 +2,10 @@ variable "cloudflare_account_id" { type = string }
 variable "cloudflare_anycast_ip_1" { type = string }
 variable "cloudflare_anycast_ip_2" { type = string }
 variable "ubuntu_wan_ip" { type = string }
-
+variable "cloudflare_api_token" {
+  type      = string
+  sensitive = true
+}
 variable "ssh_user" { 
   type    = string
   default = "terraform" 
