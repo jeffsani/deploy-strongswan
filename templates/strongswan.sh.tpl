@@ -211,7 +211,7 @@ echo "============================================================"
 echo "Terraform Verification: Waiting for IPsec tunnels to establish..."
 echo "============================================================"
 
-TIMEOUT=60
+TIMEOUT=300
 INTERVAL=5
 ELAPSED=0
 
