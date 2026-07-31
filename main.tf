@@ -48,7 +48,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
   health_check = {
     enabled   = true
     type      = "request"
-    direction = "bidirectional"
+    direction = "unidirectional" # <--- CHANGED HERE
     rate      = "mid"
     target    = { saved = local.t1_target }
   }
@@ -65,7 +65,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
   health_check = {
     enabled   = true
     type      = "request"
-    direction = "bidirectional"
+    direction = "unidirectional" # <--- CHANGED HERE
     rate      = "mid"
     target    = { saved = local.t2_target }
   }
