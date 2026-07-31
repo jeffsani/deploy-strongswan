@@ -15,6 +15,10 @@ terraform {
   }
 }
 
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
+}
+
 # Automatically fall back to ubuntu_wan_ip if targets are omitted
 locals {
   t1_target = coalesce(var.tunnel_1_health_check_target, var.ubuntu_wan_ip)
@@ -71,13 +75,14 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
 resource "null_resource" "strongswan_install" {
   triggers = {
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
-      ubuntu_wan_ip       = var.ubuntu_wan_ip
-      cf_anycast_1        = var.cloudflare_anycast_ip_1
-      cf_anycast_2        = var.cloudflare_anycast_ip_2
-      tunnel_1_inner_ip   = local.t1_target
-      tunnel_2_inner_ip   = local.t2_target
-      psk_1               = random_password.psk_1.result
-      psk_2               = random_password.psk_2.result
+      cloudflare_account_id = var.cloudflare_account_id
+      ubuntu_wan_ip         = var.ubuntu_wan_ip
+      cf_anycast_1          = var.cloudflare_anycast_ip_1
+      cf_anycast_2          = var.cloudflare_anycast_ip_2
+      tunnel_1_id           = cloudflare_magic_wan_ipsec_tunnel.tunnel_1.id
+      tunnel_2_id           = cloudflare_magic_wan_ipsec_tunnel.tunnel_2.id
+      psk_1                 = random_password.psk_1.result
+      psk_2                 = random_password.psk_2.result
     }))
   }
 
@@ -90,13 +95,14 @@ resource "null_resource" "strongswan_install" {
 
   provisioner "file" {
     content = templatefile("${path.module}/templates/strongswan.sh.tpl", {
-      ubuntu_wan_ip       = var.ubuntu_wan_ip
-      cf_anycast_1        = var.cloudflare_anycast_ip_1
-      cf_anycast_2        = var.cloudflare_anycast_ip_2
-      tunnel_1_inner_ip   = local.t1_target
-      tunnel_2_inner_ip   = local.t2_target
-      psk_1               = random_password.psk_1.result
-      psk_2               = random_password.psk_2.result
+      cloudflare_account_id = var.cloudflare_account_id
+      ubuntu_wan_ip         = var.ubuntu_wan_ip
+      cf_anycast_1          = var.cloudflare_anycast_ip_1
+      cf_anycast_2          = var.cloudflare_anycast_ip_2
+      tunnel_1_id           = cloudflare_magic_wan_ipsec_tunnel.tunnel_1.id
+      tunnel_2_id           = cloudflare_magic_wan_ipsec_tunnel.tunnel_2.id
+      psk_1                 = random_password.psk_1.result
+      psk_2                 = random_password.psk_2.result
     })
     destination = "/tmp/install_strongswan.sh"
   }
