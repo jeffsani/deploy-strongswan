@@ -73,11 +73,15 @@ cd /tmp
 rm -rf strongswan-6.0.7 strongswan-6.0.7.tar.bz2
 
 # ─── 4. Configure /etc/strongswan.conf ───
-cat > /etc/strongswan.conf << 'EOF'
+# Dynamically locate the specific network interface bound to your public WAN IP
+WAN_IF=$(ip -o addr show | grep "${remote_wan_ip}" | awk '{print $2}' | head -n 1)
+
+cat > /etc/strongswan.conf << EOF
 charon {
   load_modular = yes
   install_routes = no
   install_virtual_ip = no
+  interfaces_use = $${WAN_IF}
   plugins {
     include strongswan.d/charon/*.conf
   }
@@ -106,7 +110,7 @@ conn strongSwan-vpn-1
   type=tunnel
   fragmentation=yes
   leftauth=psk
-  left=%any
+  left=${remote_wan_ip}
   leftid=${tunnel_1_id}.${cloudflare_account_id}.ipsec.cloudflare.com
   leftsubnet=0.0.0.0/0
   right=${cf_anycast_1}
@@ -125,7 +129,7 @@ conn strongSwan-vpn-2
   type=tunnel
   fragmentation=yes
   leftauth=psk
-  left=%any
+  left=${remote_wan_ip}
   leftid=${tunnel_2_id}.${cloudflare_account_id}.ipsec.cloudflare.com
   leftsubnet=0.0.0.0/0
   right=${cf_anycast_2}
@@ -174,13 +178,13 @@ case "$${PLUTO_VERB}" in
   up-client)
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
-    ip addr add ${ubuntu_wan_ip}/32 dev "$${VTI_IF}"
+    ip addr add ${remote_wan_ip}/32 dev "$${VTI_IF}"
     
     sysctl -w "net.ipv4.conf.$${VTI_IF}.disable_policy=1"
     sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
     sysctl -w "net.ipv4.conf.all.rp_filter=0"
     
-    ip rule add from ${ubuntu_wan_ip} lookup viatunicmp 2>/dev/null || true
+    ip rule add from ${remote_wan_ip} lookup viatunicmp 2>/dev/null || true
     ip route add default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
     ;;
   down-client)
@@ -188,7 +192,7 @@ case "$${PLUTO_VERB}" in
     ip route del default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
     
     if [ ! -d /sys/class/net/vti0 ] && [ ! -d /sys/class/net/vti1 ]; then
-      ip rule del from ${ubuntu_wan_ip} lookup viatunicmp 2>/dev/null || true
+      ip rule del from ${remote_wan_ip} lookup viatunicmp 2>/dev/null || true
     fi
     ;;
 esac
@@ -204,9 +208,16 @@ fi
 iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387
 
-# ─── 10. Boot strongSwan Daemon ───
+# ─── 10. Boot strongSwan Daemon & Force Initiation ───
 IPSEC_BIN=$(command -v ipsec || echo "/usr/local/sbin/ipsec")
 $IPSEC_BIN restart
+
+# Give the daemon 2 seconds to bind to the restricted interface
+sleep 2
+
+# Force immediate active initiation
+$IPSEC_BIN up strongSwan-vpn-1 --asynchronous || true
+$IPSEC_BIN up strongSwan-vpn-2 --asynchronous || true
 
 # ─── 11. Synchronous Operational Health Check Gate ───
 echo "============================================================"
