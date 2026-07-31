@@ -61,7 +61,8 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
     type      = "request"
     direction = "unidirectional"
     rate      = "mid"
-    target    = { saved = count.index < 2 ? var.remote_wan_ip_1 : var.remote_wan_ip_2 }
+    # Attempts to pull a custom target from the list; otherwise falls back to the respective WAN IP
+    target    = { saved = try(var.health_check_targets[count.index], count.index < 2 ? var.remote_wan_ip_1 : var.remote_wan_ip_2) }
   }
 }
 
@@ -75,7 +76,7 @@ resource "null_resource" "strongswan_install" {
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
       num_of_tunnels  = var.num_of_tunnels
       remote_wan_ip_1 = var.remote_wan_ip_1
-      remote_wan_ip_2 = var.remote_wan_ip_2
+      remote_wan_ip_2 = var.remote_wan_ip_2 != null ? var.remote_wan_ip_2 : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           fqdn      = cloudflare_magic_wan_ipsec_tunnel.tunnels[i].fqdn_id
@@ -100,7 +101,7 @@ resource "null_resource" "strongswan_install" {
     content = templatefile("${path.module}/templates/strongswan.sh.tpl", {
       num_of_tunnels  = var.num_of_tunnels
       remote_wan_ip_1 = var.remote_wan_ip_1
-      remote_wan_ip_2 = var.remote_wan_ip_2
+      remote_wan_ip_2 = var.remote_wan_ip_2 != null ? var.remote_wan_ip_2 : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           fqdn      = cloudflare_magic_wan_ipsec_tunnel.tunnels[i].fqdn_id
