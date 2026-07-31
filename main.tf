@@ -39,7 +39,7 @@ resource "random_password" "psk_2" {
 # Cloudflare Magic WAN / Transit Tunnels
 resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
   account_id          = var.cloudflare_account_id
-  name                = "ubuntu-tunnel-1"
+  name                = "strongSwan-vpn-1" # <-- Updated Name
   customer_endpoint   = var.ubuntu_wan_ip
   cloudflare_endpoint = var.cloudflare_anycast_ip_1
   interface_address   = var.tunnel_1_interface_address
@@ -56,7 +56,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
 
 resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
   account_id          = var.cloudflare_account_id
-  name                = "ubuntu-tunnel-2"
+  name                = "strongSwan-vpn-2" # <-- Updated Name
   customer_endpoint   = var.ubuntu_wan_ip
   cloudflare_endpoint = var.cloudflare_anycast_ip_2
   interface_address   = var.tunnel_2_interface_address
