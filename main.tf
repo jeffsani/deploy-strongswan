@@ -35,6 +35,11 @@ locals {
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 4}/${local.prefix}",
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 6}/${local.prefix}"
   ]
+
+  # Cloudflare strict format: <label>.<account>.custom.ipsec.cloudflare.com
+  custom_fqdns = [
+    for i in range(var.num_of_tunnels) : "vpn${i + 1}.${var.cloudflare_account_id}.custom.ipsec.cloudflare.com"
+  ]
 }
 
 # Generate secure PSKs dynamically
@@ -56,12 +61,16 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   interface_address   = local.tunnel_ips[count.index]
   psk                 = random_password.psk[count.index].result
 
+  # Native nested block for Custom Identities
+  custom_remote_identities {
+    fqdn_id = local.custom_fqdns[count.index]
+  }
+
   health_check = {
     enabled   = true
     type      = "request"
     direction = "unidirectional"
     rate      = "mid"
-    # Attempts to pull a custom target from the list; otherwise falls back to the respective WAN IP
     target    = { saved = try(var.health_check_targets[count.index], count.index < 2 ? var.remote_wan_ip_1 : var.remote_wan_ip_2) }
   }
 }
@@ -79,7 +88,7 @@ resource "null_resource" "strongswan_install" {
       remote_wan_ip_2 = var.remote_wan_ip_2 != null ? var.remote_wan_ip_2 : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
-          fqdn      = cloudflare_magic_wan_ipsec_tunnel.tunnels[i].fqdn_id
+          fqdn      = local.custom_fqdns[i]
           psk       = random_password.psk[i].result
           local_ip  = i < 2 ? var.remote_wan_ip_1 : var.remote_wan_ip_2
           remote_ip = i % 2 == 0 ? var.cloudflare_anycast_ip_1 : var.cloudflare_anycast_ip_2
@@ -104,7 +113,7 @@ resource "null_resource" "strongswan_install" {
       remote_wan_ip_2 = var.remote_wan_ip_2 != null ? var.remote_wan_ip_2 : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
-          fqdn      = cloudflare_magic_wan_ipsec_tunnel.tunnels[i].fqdn_id
+          fqdn      = local.custom_fqdns[i]
           psk       = random_password.psk[i].result
           local_ip  = i < 2 ? var.remote_wan_ip_1 : var.remote_wan_ip_2
           remote_ip = i % 2 == 0 ? var.cloudflare_anycast_ip_1 : var.cloudflare_anycast_ip_2
