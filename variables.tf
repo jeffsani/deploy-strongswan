@@ -1,18 +1,43 @@
-variable "cloudflare_account_id" { type = string }
-variable "cloudflare_anycast_ip_1" { type = string }
-variable "cloudflare_anycast_ip_2" { type = string }
-variable "remote_wan_ip_1" { type = string }
-variable "remote_wan_ip_2" { type = string }
+variable "cloudflare_account_id" { 
+  type = string
+  description = "Cloudflare Account ID"
+}
+
+variable "cloudflare_anycast_ip_1" {
+  type = string
+  description = "First Cloudflare Magic Transit Anycast IP"
+}
+
+variable "cloudflare_anycast_ip_2" {
+  type = string
+  description = "Second Cloudflare Magic Transit Anycast IP"
+}
+
+variable "remote_wan_ip_1" {
+  type = string
+  description = "The primary public WAN IP of the remote customer endpoint"
+}
+
+variable "remote_wan_ip_2" {
+  type = string
+  description = "The secondary public WAN IP of the remote customer endpoint (required if num_of_tunnels is 4)"
+}
+
 variable "cloudflare_api_token" {
   type      = string
+  description = "Cloudflare API Token"
   sensitive = true
 }
+
 variable "ssh_user" { 
   type    = string
+  description = "SSH username for the remote host"
   default = "terraform" 
 }
+
 variable "ssh_private_key" { 
   type      = string
+  description = "SSH private key for the remote host"
   sensitive = true 
 }
 
