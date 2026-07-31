@@ -19,10 +19,10 @@ provider "cloudflare" {
   api_token = var.cloudflare_api_token
 }
 
-# Automatically fall back to ubuntu_wan_ip if targets are omitted
+# Automatically fall back to remote_wan_ip if targets are omitted
 locals {
-  t1_target = coalesce(var.tunnel_1_health_check_target, var.ubuntu_wan_ip)
-  t2_target = coalesce(var.tunnel_2_health_check_target, var.ubuntu_wan_ip)
+  t1_target = coalesce(var.tunnel_1_health_check_target, var.remote_wan_ip)
+  t2_target = coalesce(var.tunnel_2_health_check_target, var.remote_wan_ip)
 }
 
 # Generate secure PSKs internally inside Terraform
@@ -40,7 +40,7 @@ resource "random_password" "psk_2" {
 resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
   account_id          = var.cloudflare_account_id
   name                = "strongSwan-vpn-1"
-  customer_endpoint   = var.ubuntu_wan_ip
+  customer_endpoint   = var.remote_wan_ip
   cloudflare_endpoint = var.cloudflare_anycast_ip_1
   interface_address   = var.tunnel_1_interface_address
   psk                 = random_password.psk_1.result
@@ -57,7 +57,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
 resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
   account_id          = var.cloudflare_account_id
   name                = "strongSwan-vpn-2"
-  customer_endpoint   = var.ubuntu_wan_ip
+  customer_endpoint   = var.remote_wan_ip
   cloudflare_endpoint = var.cloudflare_anycast_ip_2
   interface_address   = var.tunnel_2_interface_address
   psk                 = random_password.psk_2.result
@@ -71,12 +71,12 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
   }
 }
 
-# Remote execution on Ubuntu/RHEL instance
+# Remote execution on the instance
 resource "null_resource" "strongswan_install" {
   triggers = {
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
       cloudflare_account_id = var.cloudflare_account_id
-      ubuntu_wan_ip         = var.ubuntu_wan_ip
+      remote_wan_ip         = var.remote_wan_ip
       cf_anycast_1          = var.cloudflare_anycast_ip_1
       cf_anycast_2          = var.cloudflare_anycast_ip_2
       tunnel_1_id           = cloudflare_magic_wan_ipsec_tunnel.tunnel_1.id
@@ -90,13 +90,13 @@ resource "null_resource" "strongswan_install" {
     type        = "ssh"
     user        = var.ssh_user
     private_key = var.ssh_private_key
-    host        = var.ubuntu_wan_ip
+    host        = var.remote_wan_ip
   }
 
   provisioner "file" {
     content = templatefile("${path.module}/templates/strongswan.sh.tpl", {
       cloudflare_account_id = var.cloudflare_account_id
-      ubuntu_wan_ip         = var.ubuntu_wan_ip
+      remote_wan_ip         = var.remote_wan_ip
       cf_anycast_1          = var.cloudflare_anycast_ip_1
       cf_anycast_2          = var.cloudflare_anycast_ip_2
       tunnel_1_id           = cloudflare_magic_wan_ipsec_tunnel.tunnel_1.id
@@ -107,7 +107,6 @@ resource "null_resource" "strongswan_install" {
     destination = "/tmp/install_strongswan.sh"
   }
 
-  # Chained commands with && ensure failures correctly abort the Terraform run
   provisioner "remote-exec" {
     inline = [
       "chmod +x /tmp/install_strongswan.sh && sudo bash /tmp/install_strongswan.sh && rm /tmp/install_strongswan.sh"
