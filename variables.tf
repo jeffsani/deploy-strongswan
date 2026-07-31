@@ -3,15 +3,6 @@ variable "cloudflare_anycast_ip_1" { type = string }
 variable "cloudflare_anycast_ip_2" { type = string }
 variable "ubuntu_wan_ip" { type = string }
 
-variable "psk_1" { 
-  type      = string
-  sensitive = true 
-}
-variable "psk_2" { 
-  type      = string
-  sensitive = true 
-}
-
 # --- Tunnel Endpoints ---
 variable "tunnel_1_interface_address" { 
   type        = string
