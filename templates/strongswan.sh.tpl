@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+echo "Starting StrongSwan installation..."
+
 # 1. Install StrongSwan and routing dependencies
 apt-get update
 apt-get install -y strongswan strongswan-pki libcharon-extra-plugins iproute2
@@ -24,23 +26,23 @@ cat << 'EOF' > /etc/strongswan.d/ipsec-vti.sh
 set -o nounset
 set -o errexit
 
-VTI_IF="vti\${PLUTO_REQID}"
+VTI_IF="vti$${PLUTO_REQID}"
 
-case "\${PLUTO_VERB}" in
+case "$${PLUTO_VERB}" in
     up-client)
-        ip tunnel add "\${VTI_IF}" local "\${PLUTO_ME}" remote "\${PLUTO_PEER}" mode vti key "\${PLUTO_MARK_OUT%%/*}"
-        ip link set "\${VTI_IF}" up
+        ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
+        ip link set "$${VTI_IF}" up
         
-        if [ "\${PLUTO_CONNECTION}" = "cf-tunnel-1" ]; then
-            ip addr add ${tunnel_1_inner_ip} dev "\${VTI_IF}"
-        elif [ "\${PLUTO_CONNECTION}" = "cf-tunnel-2" ]; then
-            ip addr add ${tunnel_2_inner_ip} dev "\${VTI_IF}"
+        if [ "$${PLUTO_CONNECTION}" = "cf-tunnel-1" ]; then
+            ip addr add ${tunnel_1_inner_ip}/31 dev "$${VTI_IF}"
+        elif [ "$${PLUTO_CONNECTION}" = "cf-tunnel-2" ]; then
+            ip addr add ${tunnel_2_inner_ip}/31 dev "$${VTI_IF}"
         fi
         
-        sysctl -w "net.ipv4.conf.\${VTI_IF}.disable_policy=1"
+        sysctl -w "net.ipv4.conf.$${VTI_IF}.disable_policy=1"
         ;;
     down-client)
-        ip tunnel del "\${VTI_IF}"
+        ip tunnel del "$${VTI_IF}"
         ;;
 esac
 EOF
@@ -98,3 +100,6 @@ EOF
 # 6. Kick off StrongSwan
 systemctl restart strongswan-starter
 systemctl enable strongswan-starter
+
+echo "Installation complete. Checking status..."
+ipsec status
