@@ -2,10 +2,60 @@
 set -o errexit
 set -o nounset
 
-# ─── 1. Install Compilation & Network Dependencies ───
-apt-get update && apt-get install -y build-essential libgmp-dev libssl-dev iptables iproute2 wget bzip2
+echo "Starting Post-Quantum IPsec Tunnel Deployment..."
 
-# ─── 2. Compile strongSwan 6 from Source (with ML-KEM Support) ───
+# ─── 1. OS Detection & Dependency Installation ───
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  OS_ID=$ID
+else
+  echo "ERROR: Unsupported OS. Cannot determine distribution."
+  exit 1
+fi
+
+echo "Detected OS: $OS_ID"
+
+if [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then
+  # Ubuntu / Debian Path
+  apt-get update
+  apt-get install -y build-essential libgmp-dev libssl-dev iptables iproute2 wget bzip2 tar
+
+  # UFW NetFlow Gateway Forwarding Logic
+  if command -v ufw >/dev/null 2>&1; then
+    echo "Configuring UFW to ALLOW default transit forwarding..."
+    sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+    ufw reload || true
+  fi
+
+elif [[ "$OS_ID" == "ol" || "$OS_ID" == "rhel" || "$OS_ID" == "rocky" || "$OS_ID" == "almalinux" || "$OS_ID" == "centos" ]]; then
+  # Oracle Linux 9 / RHEL 9 Path
+  dnf install -y gcc make gmp-devel openssl-devel iptables iproute wget bzip2 tar
+
+  # Firewalld NetFlow Gateway Forwarding Logic
+  if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+    echo "Configuring Firewalld to ALLOW transit forwarding..."
+    # RHEL 9 native approach to allow cross-zone transit routing
+    firewall-cmd --permanent --add-forward-port=port=500:proto=udp:toport=500 2>/dev/null || true
+    firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -j ACCEPT 2>/dev/null || true
+    firewall-cmd --reload || true
+  else
+    # Fallback if firewalld is disabled but iptables is active
+    iptables -P FORWARD ACCEPT || true
+  fi
+else
+  echo "ERROR: Unsupported Linux distribution: $OS_ID"
+  exit 1
+fi
+
+# ─── 2. Kernel IP Forwarding (NetFlow Gateway Requirement) ───
+echo "Enabling Kernel IP Forwarding..."
+sysctl -w net.ipv4.ip_forward=1
+if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+  echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+fi
+
+# ─── 3. Compile strongSwan 6 from Source (with ML-KEM Support) ───
+echo "Compiling strongSwan 6..."
 cd /tmp
 wget -q https://download.strongswan.org/strongswan-6.0.7.tar.bz2
 tar -xjf strongswan-6.0.7.tar.bz2
@@ -18,7 +68,7 @@ make install
 cd /tmp
 rm -rf strongswan-6.0.7 strongswan-6.0.7.tar.bz2
 
-# ─── 3. Configure /etc/strongswan.conf ───
+# ─── 4. Configure /etc/strongswan.conf ───
 cat > /etc/strongswan.conf << 'EOF'
 charon {
   load_modular = yes
@@ -31,7 +81,7 @@ charon {
 include strongswan.d/*.conf
 EOF
 
-# ─── 4. Configure /etc/ipsec.conf ───
+# ─── 5. Configure /etc/ipsec.conf ───
 cat > /etc/ipsec.conf << 'EOF'
 config setup
   charondebug="all"
@@ -85,25 +135,24 @@ conn strongSwan-vpn-2
   leftupdown=/etc/strongswan.d/ipsec-vti.sh
 EOF
 
-# ─── 5. Configure /etc/ipsec.secrets ───
+# ─── 6. Configure /etc/ipsec.secrets ───
 cat > /etc/ipsec.secrets << 'EOF'
 ${tunnel_1_id}.${cloudflare_account_id}.ipsec.cloudflare.com ${cf_anycast_1}/32 : PSK "${psk_1}"
 ${tunnel_2_id}.${cloudflare_account_id}.ipsec.cloudflare.com ${cf_anycast_2}/32 : PSK "${psk_2}"
 EOF
 
-# ─── 6. Define Explicit Policy Routing Table ───
+# ─── 7. Define Explicit Policy Routing Table ───
 if ! grep -q "viatunicmp" /etc/iproute2/rt_tables; then
   echo "200 viatunicmp" >> /etc/iproute2/rt_tables
 fi
 
-# ─── 7. Configure /etc/strongswan.d/ipsec-vti.sh ───
+# ─── 8. Configure /etc/strongswan.d/ipsec-vti.sh ───
 mkdir -p /etc/strongswan.d
 cat > /etc/strongswan.d/ipsec-vti.sh << 'VTISCRIPT'
 #!/bin/bash
 set -o nounset
 set -o errexit
 
-# Evaluates the strongSwan system environment identifier
 case "$${PLUTO_CONNECTION}" in
   *vpn-1*)
     VTI_IF="vti0"
@@ -138,14 +187,57 @@ case "$${PLUTO_VERB}" in
     fi
     ;;
 esac
-echo "executed"
+echo "VTI interface status changed successfully"
 VTISCRIPT
 
 chmod +x /etc/strongswan.d/ipsec-vti.sh
+# Ensure SELinux context is correct for RHEL 9 execution
+if command -v chcon >/dev/null 2>&1; then
+  chcon -t bin_t /etc/strongswan.d/ipsec-vti.sh 2>/dev/null || true
+fi
 
-# ─── 8. Apply Firewall TCP MSS Clamping ───
+# ─── 9. Apply Firewall TCP MSS Clamping ───
 iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387
 
-# ─── 9. Boot strongSwan Daemon ───
+# ─── 10. Boot strongSwan Daemon ───
 /usr/sbin/ipsec restart
+
+# ─── 11. Synchronous Operational Health Check Gate ───
+echo "============================================================"
+echo "Terraform Verification: Waiting for IPsec tunnels to establish..."
+echo "============================================================"
+
+TIMEOUT=60
+INTERVAL=5
+ELAPSED=0
+
+while [ $ELAPSED -lt $TIMEOUT ]; do
+  # Capture the current control plane state
+  CURRENT_STATUS=$(/usr/sbin/ipsec status 2>&1 || true)
+  
+  # Check if BOTH explicitly named tunnels have reached the ESTABLISHED phase
+  if echo "$CURRENT_STATUS" | grep -q "strongSwan-vpn-1.*ESTABLISHED" && \
+     echo "$CURRENT_STATUS" | grep -q "strongSwan-vpn-2.*ESTABLISHED"; then
+    echo "------------------------------------------------------------"
+    echo "SUCCESS: Both Post-Quantum tunnels are securely ESTABLISHED!"
+    echo "------------------------------------------------------------"
+    /usr/sbin/ipsec status
+    exit 0
+  fi
+  
+  echo "Handshake pending... Retrying in $${INTERVAL}s ($${ELAPSED}/$${TIMEOUT}s)"
+  sleep $INTERVAL
+  ELAPSED=$((ELAPSED + INTERVAL))
+done
+
+# If control reaches here, the tunnels failed to establish within the window
+echo "============================================================"
+echo "CRITICAL ERROR: Tunnels failed to establish within $${TIMEOUT} seconds."
+echo "Halting Terraform deployment state."
+echo "============================================================"
+echo "--- Diagnostic Log Dump ---"
+/usr/sbin/ipsec statusall || true
+echo "----------------------------"
+
+exit 1
