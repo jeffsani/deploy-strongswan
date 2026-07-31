@@ -39,7 +39,7 @@ resource "random_password" "psk_2" {
 # Cloudflare Magic WAN / Transit Tunnels
 resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
   account_id          = var.cloudflare_account_id
-  name                = "strongSwan-vpn-1" # <-- Updated Name
+  name                = "strongSwan-vpn-1"
   customer_endpoint   = var.ubuntu_wan_ip
   cloudflare_endpoint = var.cloudflare_anycast_ip_1
   interface_address   = var.tunnel_1_interface_address
@@ -56,7 +56,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
 
 resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
   account_id          = var.cloudflare_account_id
-  name                = "strongSwan-vpn-2" # <-- Updated Name
+  name                = "strongSwan-vpn-2"
   customer_endpoint   = var.ubuntu_wan_ip
   cloudflare_endpoint = var.cloudflare_anycast_ip_2
   interface_address   = var.tunnel_2_interface_address
@@ -71,7 +71,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
   }
 }
 
-# Remote execution on Ubuntu instance
+# Remote execution on Ubuntu/RHEL instance
 resource "null_resource" "strongswan_install" {
   triggers = {
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
@@ -107,11 +107,10 @@ resource "null_resource" "strongswan_install" {
     destination = "/tmp/install_strongswan.sh"
   }
 
+  # Chained commands with && ensure failures correctly abort the Terraform run
   provisioner "remote-exec" {
     inline = [
-      "chmod +x /tmp/install_strongswan.sh",
-      "sudo bash /tmp/install_strongswan.sh",
-      "rm /tmp/install_strongswan.sh"
+      "chmod +x /tmp/install_strongswan.sh && sudo bash /tmp/install_strongswan.sh && rm /tmp/install_strongswan.sh"
     ]
   }
 
