@@ -2,6 +2,9 @@
 set -o errexit
 set -o nounset
 
+# Ensure all standard and local binary paths are explicitly available to the script
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 echo "Starting Post-Quantum IPsec Tunnel Deployment..."
 
 # ─── 1. OS Detection & Dependency Installation ───
@@ -34,12 +37,10 @@ elif [[ "$OS_ID" == "ol" || "$OS_ID" == "rhel" || "$OS_ID" == "rocky" || "$OS_ID
   # Firewalld NetFlow Gateway Forwarding Logic
   if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
     echo "Configuring Firewalld to ALLOW transit forwarding..."
-    # RHEL 9 native approach to allow cross-zone transit routing
     firewall-cmd --permanent --add-forward-port=port=500:proto=udp:toport=500 2>/dev/null || true
     firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -j ACCEPT 2>/dev/null || true
     firewall-cmd --reload || true
   else
-    # Fallback if firewalld is disabled but iptables is active
     iptables -P FORWARD ACCEPT || true
   fi
 else
@@ -61,7 +62,7 @@ wget -q https://download.strongswan.org/strongswan-6.0.7.tar.bz2
 tar -xjf strongswan-6.0.7.tar.bz2
 cd strongswan-6.0.7
 
-./configure --prefix=/usr --sysconfdir=/etc --enable-ml --enable-openssl
+./configure --prefix=/usr --sysconfdir=/etc --enable-ml --enable-openssl --enable-stroke
 make -j$(nproc)
 make install
 
@@ -191,7 +192,6 @@ echo "VTI interface status changed successfully"
 VTISCRIPT
 
 chmod +x /etc/strongswan.d/ipsec-vti.sh
-# Ensure SELinux context is correct for RHEL 9 execution
 if command -v chcon >/dev/null 2>&1; then
   chcon -t bin_t /etc/strongswan.d/ipsec-vti.sh 2>/dev/null || true
 fi
@@ -201,7 +201,10 @@ iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387
 
 # ─── 10. Boot strongSwan Daemon ───
-/usr/sbin/ipsec restart
+# Dynamically find the ipsec binary in the system PATH
+IPSEC_BIN=$(command -v ipsec || echo "/usr/local/sbin/ipsec")
+
+$IPSEC_BIN restart
 
 # ─── 11. Synchronous Operational Health Check Gate ───
 echo "============================================================"
@@ -213,16 +216,14 @@ INTERVAL=5
 ELAPSED=0
 
 while [ $ELAPSED -lt $TIMEOUT ]; do
-  # Capture the current control plane state
-  CURRENT_STATUS=$(/usr/sbin/ipsec status 2>&1 || true)
+  CURRENT_STATUS=$($IPSEC_BIN status 2>&1 || true)
   
-  # Check if BOTH explicitly named tunnels have reached the ESTABLISHED phase
   if echo "$CURRENT_STATUS" | grep -q "strongSwan-vpn-1.*ESTABLISHED" && \
      echo "$CURRENT_STATUS" | grep -q "strongSwan-vpn-2.*ESTABLISHED"; then
     echo "------------------------------------------------------------"
     echo "SUCCESS: Both Post-Quantum tunnels are securely ESTABLISHED!"
     echo "------------------------------------------------------------"
-    /usr/sbin/ipsec status
+    $IPSEC_BIN status
     exit 0
   fi
   
@@ -231,13 +232,12 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
   ELAPSED=$((ELAPSED + INTERVAL))
 done
 
-# If control reaches here, the tunnels failed to establish within the window
 echo "============================================================"
 echo "CRITICAL ERROR: Tunnels failed to establish within $${TIMEOUT} seconds."
 echo "Halting Terraform deployment state."
 echo "============================================================"
 echo "--- Diagnostic Log Dump ---"
-/usr/sbin/ipsec statusall || true
+$IPSEC_BIN statusall || true
 echo "----------------------------"
 
 exit 1
