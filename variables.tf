@@ -5,7 +5,7 @@ variable "ubuntu_wan_ip" { type = string }
 
 variable "ssh_user" { 
   type    = string
-  default = "root" 
+  default = "terraform" 
 }
 variable "ssh_private_key" { 
   type      = string
