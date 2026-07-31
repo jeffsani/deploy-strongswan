@@ -68,20 +68,28 @@ cd /tmp
 rm -rf strongswan-6.0.7 strongswan-6.0.7.tar.bz2
 
 # ─── 4. Configure /etc/strongswan.conf ───
-WAN_IF_1=$(ip -o addr show | grep "${remote_wan_ip_1}" | awk '{print $2}' | head -n 1)
+WAN_IF_1=$(ip -o addr show | grep "${remote_wan_ip_1}" | awk '{print $2}' | head -n 1 || true)
 %{ if num_of_tunnels == 4 ~}
-WAN_IF_2=$(ip -o addr show | grep "${remote_wan_ip_2}" | awk '{print $2}' | head -n 1)
+WAN_IF_2=$(ip -o addr show | grep "${remote_wan_ip_2}" | awk '{print $2}' | head -n 1 || true)
 INTERFACES="$${WAN_IF_1},$${WAN_IF_2}"
 %{ else ~}
 INTERFACES="$${WAN_IF_1}"
 %{ endif ~}
+
+INTERFACES=$(echo "$INTERFACES" | sed 's/^,//;s/,$//')
 
 cat > /etc/strongswan.conf << EOF
 charon {
   load_modular = yes
   install_routes = no
   install_virtual_ip = no
-  interfaces_use = $${INTERFACES}
+EOF
+
+if [ -n "$INTERFACES" ]; then
+  echo "  interfaces_use = $INTERFACES" >> /etc/strongswan.conf
+fi
+
+cat >> /etc/strongswan.conf << EOF
   plugins {
     include strongswan.d/charon/*.conf
   }
@@ -111,8 +119,8 @@ conn strongSwan-vpn-${i+1}
   type=tunnel
   fragmentation=yes
   leftauth=psk
-  left=${t.local_ip}
-  leftid=${t.fqdn}
+  left=%any
+  leftid=${t.local_ip}
   leftsubnet=0.0.0.0/0
   right=${t.remote_ip}
   rightid=${t.remote_ip}
@@ -131,7 +139,7 @@ EOF
 # ─── 6. Configure /etc/ipsec.secrets ───
 cat > /etc/ipsec.secrets << 'EOF'
 %{ for t in tunnels ~}
-@${t.fqdn} : PSK "${t.psk}"
+${t.local_ip} : PSK "${t.psk}"
 %{ endfor ~}
 EOF
 
@@ -164,7 +172,7 @@ case "$${PLUTO_VERB}" in
   up-client)
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
-    ip addr add $${LOCAL_WAN_IP}/32 dev "$${VTI_IF}"
+    ip addr add $${LOCAL_WAN_IP}/32 dev "$${VTI_IF}" || true
     
     sysctl -w "net.ipv4.conf.$${VTI_IF}.disable_policy=1"
     sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
@@ -174,10 +182,9 @@ case "$${PLUTO_VERB}" in
     ip route add default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
     ;;
   down-client)
-    ip tunnel del "$${VTI_IF}"
+    ip tunnel del "$${VTI_IF}" || true
     ip route del default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
     
-    # Intelligently delete the routing rule ONLY if no other active tunnels are using this IP
     ACTIVE_VTIS=$(ip tunnel show 2>/dev/null | grep -c "local $${LOCAL_WAN_IP}" || true)
     if [ "$ACTIVE_VTIS" -eq 0 ]; then
       ip rule del from $${LOCAL_WAN_IP} lookup viatunicmp 2>/dev/null || true
