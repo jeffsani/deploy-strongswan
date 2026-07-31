@@ -4,9 +4,9 @@ output "tunnel_generated_psks" {
   sensitive   = true
 }
 
-output "tunnel_fqdn_ids" {
-  description = "The Cloudflare auto-generated FQDN IDs for the IPsec tunnels"
-  value       = cloudflare_magic_wan_ipsec_tunnel.tunnels[*].fqdn_id
+output "tunnel_custom_fqdns" {
+  description = "The discrete Custom FQDNs applied to the IPsec tunnels"
+  value       = local.custom_fqdns
 }
 
 output "tunnel_interface_addresses" {
