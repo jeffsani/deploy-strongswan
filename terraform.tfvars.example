@@ -1,0 +1,48 @@
+# -----------------------------------------------------------------------------
+# Cloudflare Authentication
+# -----------------------------------------------------------------------------
+cloudflare_api_token  = "your_cloudflare_api_token_here"
+cloudflare_account_id = "your_cloudflare_account_id_here"
+
+# -----------------------------------------------------------------------------
+# Remote Host Authentication
+# -----------------------------------------------------------------------------
+# The user must exist on the remote host and have passwordless sudo privileges
+ssh_user        = "terraform"
+ssh_private_key = <<-EOF
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn
+... (replace with your actual private key) ...
+pQy5T5+49uTqgI5mAAAAEXRfc3dhbkBzc2gtaG9zdAECAwQ=
+-----END OPENSSH PRIVATE KEY-----
+EOF
+
+# -----------------------------------------------------------------------------
+# Tunnel Configuration
+# -----------------------------------------------------------------------------
+# Specify 2 for a single ISP setup, or 4 for a dual ISP setup
+num_of_tunnels = 2
+
+# Cloudflare Magic WAN Anycast IPs
+cloudflare_anycast_ip_1 = "162.159.x.x"
+cloudflare_anycast_ip_2 = "172.64.x.x"
+
+# Public WAN IPs of your local server/router
+remote_wan_ip_1 = "71.24.162.133"
+# remote_wan_ip_2 = "203.0.113.50" # Uncomment and populate if num_of_tunnels = 4
+
+# The starting /31 prefix for the internal VTI interfaces
+tunnel_interface_prefix_base = "172.20.15.2/31"
+
+# -----------------------------------------------------------------------------
+# Advanced Routing (Optional)
+# -----------------------------------------------------------------------------
+# If your server is behind a 1:1 NAT, Cloudflare's health checks to the public 
+# WAN IP will fail. Provide a list of internal IPs to use as the health check targets.
+# Leave as an empty list [] to default to the remote WAN IPs.
+health_check_targets = []
+
+# Example for NAT scenarios:
+# health_check_targets = ["10.0.0.5", "10.0.0.5"] 
+# Example for 4 tunnels behind NAT:
+# health_check_targets = ["10.0.0.5", "10.0.0.5", "10.0.1.5", "10.0.1.5"]
