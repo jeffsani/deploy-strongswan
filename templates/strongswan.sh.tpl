@@ -3,11 +3,9 @@ set -e
 
 echo "Starting StrongSwan installation..."
 
-# 1. Install StrongSwan and routing dependencies
 apt-get update
 apt-get install -y strongswan strongswan-pki libcharon-extra-plugins iproute2
 
-# 2. Configure charon to not auto-install routes (Required for VTI)
 cat << 'EOF' > /etc/strongswan.conf
 charon {
     load_modular = yes
@@ -20,7 +18,6 @@ charon {
 include strongswan.d/*.conf
 EOF
 
-# 3. Create the dynamic VTI lifecycle script
 cat << 'EOF' > /etc/strongswan.d/ipsec-vti.sh
 #!/bin/bash
 set -o nounset
@@ -48,7 +45,6 @@ esac
 EOF
 chmod +x /etc/strongswan.d/ipsec-vti.sh
 
-# 4. Configure the IPsec Tunnels
 cat << EOF > /etc/ipsec.conf
 config setup
     charondebug="all"
@@ -91,15 +87,10 @@ conn cf-tunnel-2
     auto=start
 EOF
 
-# 5. Inject Pre-Shared Keys securely
 cat << EOF > /etc/ipsec.secrets
 ${ubuntu_wan_ip} ${cf_anycast_1} : PSK "${psk_1}"
 ${ubuntu_wan_ip} ${cf_anycast_2} : PSK "${psk_2}"
 EOF
 
-# 6. Kick off StrongSwan
 systemctl restart strongswan-starter
 systemctl enable strongswan-starter
-
-echo "Installation complete. Checking status..."
-ipsec status
