@@ -13,7 +13,6 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
   customer_endpoint   = var.ubuntu_wan_ip
   cloudflare_endpoint = var.cloudflare_anycast_ip_1
   interface_address   = var.tunnel_1_interface_address
-  psk                 = var.psk_1
 
   health_check = {
     enabled   = true
@@ -30,7 +29,6 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
   customer_endpoint   = var.ubuntu_wan_ip
   cloudflare_endpoint = var.cloudflare_anycast_ip_2
   interface_address   = var.tunnel_2_interface_address
-  psk                 = var.psk_2
 
   health_check = {
     enabled   = true
