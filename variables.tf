@@ -1,7 +1,8 @@
 variable "cloudflare_account_id" { type = string }
 variable "cloudflare_anycast_ip_1" { type = string }
 variable "cloudflare_anycast_ip_2" { type = string }
-variable "remote_wan_ip" { type = string }
+variable "remote_wan_ip_1" { type = string }
+variable "remote_wan_ip_2" { type = string }
 variable "cloudflare_api_token" {
   type      = string
   sensitive = true
@@ -16,14 +17,15 @@ variable "ssh_private_key" {
 }
 
 # --- Tunnel Endpoints ---
-variable "tunnel_1_interface_address" { 
+variable "tunnel_interface_prefix_base" { 
   type        = string
-  description = "The Cloudflare side of the /31 CIDR block for Tunnel 1"
+  description = "The base /31 CIDR block to use for the first tunnel"
 }
 
-variable "tunnel_2_interface_address" { 
-  type        = string
-  description = "The Cloudflare side of the /31 CIDR block for Tunnel 2"
+variable "num_of_tunnels" { 
+  type        = integer
+  description = "The number of tunnels to be created"
+  default     = 2
 }
 
 variable "tunnel_1_health_check_target" { 
