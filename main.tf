@@ -48,7 +48,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_1" {
   health_check = {
     enabled   = true
     type      = "request"
-    direction = "unidirectional" # <--- CHANGED HERE
+    direction = "unidirectional"
     rate      = "mid"
     target    = { saved = local.t1_target }
   }
@@ -65,7 +65,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
   health_check = {
     enabled   = true
     type      = "request"
-    direction = "unidirectional" # <--- CHANGED HERE
+    direction = "unidirectional"
     rate      = "mid"
     target    = { saved = local.t2_target }
   }
@@ -74,6 +74,10 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnel_2" {
 # Remote execution on the instance
 resource "null_resource" "strongswan_install" {
   triggers = {
+    remote_ip   = var.remote_wan_ip
+    ssh_user    = var.ssh_user
+    private_key = var.ssh_private_key
+    
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
       cloudflare_account_id = var.cloudflare_account_id
       remote_wan_ip         = var.remote_wan_ip
@@ -88,9 +92,9 @@ resource "null_resource" "strongswan_install" {
 
   connection {
     type        = "ssh"
-    user        = var.ssh_user
-    private_key = var.ssh_private_key
-    host        = var.remote_wan_ip
+    user        = self.triggers.ssh_user
+    private_key = self.triggers.private_key
+    host        = self.triggers.remote_ip
   }
 
   provisioner "file" {
@@ -110,6 +114,25 @@ resource "null_resource" "strongswan_install" {
   provisioner "remote-exec" {
     inline = [
       "chmod +x /tmp/install_strongswan.sh && sudo bash /tmp/install_strongswan.sh && rm /tmp/install_strongswan.sh"
+    ]
+  }
+
+  provisioner "remote-exec" {
+    when = destroy
+    inline = [
+      "echo 'Starting strongSwan teardown...'",
+      "IPSEC_BIN=$(command -v ipsec || echo \"/usr/local/sbin/ipsec\")",
+      "sudo $IPSEC_BIN stop || true",
+      "sudo ip link set vti0 down || true",
+      "sudo ip tunnel del vti0 || true",
+      "sudo ip link set vti1 down || true",
+      "sudo ip tunnel del vti1 || true",
+      "sudo ip route del default table viatunicmp 2>/dev/null || true",
+      "sudo ip rule del lookup viatunicmp 2>/dev/null || true",
+      "sudo sed -i '/200 viatunicmp/d' /etc/iproute2/rt_tables || true",
+      "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
+      "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
+      "echo 'strongSwan configuration successfully removed.'"
     ]
   }
 
