@@ -22,10 +22,14 @@ variable "tunnel_interface_prefix_base" {
   description = "The base /31 CIDR block to use for the first tunnel"
 }
 
-variable "num_of_tunnels" { 
-  type        = integer
-  description = "The number of tunnels to be created"
+variable "num_of_tunnels" {
+  type        = number
+  description = "Number of tunnels to deploy (2 or 4). Use 4 if you have 2 discrete ISP links."
   default     = 2
+  validation {
+    condition     = contains([2, 4], var.num_of_tunnels)
+    error_message = "The number of tunnels must be either 2 or 4."
+  }
 }
 
 variable "health_check_targets" {
