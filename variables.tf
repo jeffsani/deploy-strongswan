@@ -67,3 +67,9 @@ variable "health_check_targets" {
   description = "Optional list of custom health check target IPs (e.g., internal IPs for NAT scenarios). If an index is omitted, it defaults to the respective remote WAN IP."
   default     = []
 }
+
+variable "tunnel_flow_traffic_only" {
+  type        = bool
+  description = "If true, only network flow logging traffic (sFlow/NetFlow to 162.159.65.1) is directed through the tunnels. If false, the tunnels act as the default gateway for the 192.168.15.0/24 LAN network."
+  default     = false
+}
