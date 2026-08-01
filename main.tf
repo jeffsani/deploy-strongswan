@@ -90,6 +90,7 @@ resource "null_resource" "strongswan_install" {
       remote_wan_ip_1                = trimspace(var.remote_wan_ip_1)
       remote_wan_ip_2                = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       cloudflare_internal_account_id = var.cloudflare_internal_account_id
+      tunnel_flow_traffic_only       = var.tunnel_flow_traffic_only
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           psk         = random_password.psk[i].result
@@ -117,6 +118,7 @@ resource "null_resource" "strongswan_install" {
       remote_wan_ip_1                = trimspace(var.remote_wan_ip_1)
       remote_wan_ip_2                = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       cloudflare_internal_account_id = var.cloudflare_internal_account_id
+      tunnel_flow_traffic_only       = var.tunnel_flow_traffic_only
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           psk         = random_password.psk[i].result
@@ -159,6 +161,8 @@ resource "null_resource" "strongswan_install" {
       "sudo ip rule del ipproto tcp sport 22 lookup main 2>/dev/null || true",
       "sudo ip rule del to ${self.triggers.anycast_ip_1} lookup main 2>/dev/null || true",
       "sudo ip rule del to ${self.triggers.anycast_ip_2} lookup main 2>/dev/null || true",
+      "sudo ip rule del to 162.159.65.1/32 2>/dev/null || true",
+      "sudo ip rule del from 192.168.15.0/24 2>/dev/null || true",
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
       "echo 'strongSwan configuration successfully removed.'"
