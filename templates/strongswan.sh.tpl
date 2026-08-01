@@ -148,8 +148,8 @@ if ! grep -q "viatunicmp" /etc/iproute2/rt_tables; then
   echo "200 viatunicmp" >> /etc/iproute2/rt_tables
 fi
 
-# Protect active and future SSH control sessions from being swallowed by the VTI policy routing engine
-ip rule add ipproto tcp sport 22 lookup main priority 10 2>/dev/null || true
+# CRITICAL FIX: Explicitly use priority 5 so this executes BEFORE the tunnel routing rule
+ip rule add ipproto tcp sport 22 lookup main priority 5 2>/dev/null || true
 
 # ─── 8. Configure /etc/strongswan.d/ipsec-vti.sh ───
 mkdir -p /etc/strongswan.d
@@ -178,7 +178,7 @@ case "$${PLUTO_VERB}" in
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
     
-    # CRITICAL FIX: Assign the private customer-side IP to the interface so Linux naturally acknowledges and replies to inside probes
+    # CRITICAL FIX: Assign the private customer-side IP to the interface so Linux acknowledges and replies to bidirectional probes
     ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
     ip addr add "$${LOCAL_WAN_IP}/32" dev "$${VTI_IF}" || true
     
