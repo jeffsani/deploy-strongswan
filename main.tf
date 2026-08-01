@@ -94,8 +94,8 @@ resource "null_resource" "strongswan_install" {
           local_ip    = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
           remote_ip   = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
           customer_ip = local.customer_ips[i]
-          vti_if      = "vti${i + 1}" # Shifted to start at vti1 to avoid master conflict zone
-          rt_table    = 10 + i        # Discrete routing tables per tunnel to avoid collisions
+          vti_if      = "vti${i + 1}"
+          rt_table    = 10 + i
           mark        = 41 + i
         }
       ]
@@ -155,6 +155,8 @@ resource "null_resource" "strongswan_install" {
       "sudo ip rule del lookup 12 2>/dev/null || true",
       "sudo ip rule del lookup 13 2>/dev/null || true",
       "sudo ip rule del ipproto tcp sport 22 lookup main 2>/dev/null || true",
+      "sudo ip rule del to ${trimspace(var.cloudflare_anycast_ip_1)} lookup main 2>/dev/null || true",
+      "sudo ip rule del to ${trimspace(var.cloudflare_anycast_ip_2)} lookup main 2>/dev/null || true",
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
       "echo 'strongSwan configuration successfully removed.'"
