@@ -99,7 +99,6 @@ INTERFACES="$${WAN_IF_1}"
 
 INTERFACES=$(echo "$INTERFACES" | sed 's/^,//;s/,$//')
 
-# FIX: Omitted load_modular entirely so charon natively falls back to auto-loading all compiled-in plugins
 cat > /etc/strongswan.conf << EOF
 charon {
   install_routes = no
@@ -181,6 +180,7 @@ case "$${PLUTO_CONNECTION}" in
     LOCAL_WAN_IP="${t.local_ip}"
     CUSTOMER_IP="${t.customer_ip}"
     RT_TABLE="${t.rt_table}"
+    VTI_MARK="${t.mark}"
     ;;
 %{ endfor ~}
   *)
@@ -188,12 +188,14 @@ case "$${PLUTO_CONNECTION}" in
     LOCAL_WAN_IP="${remote_wan_ip_1}"
     CUSTOMER_IP="${tunnels[0].customer_ip}"
     RT_TABLE="${tunnels[0].rt_table}"
+    VTI_MARK="${tunnels[0].mark}"
     ;;
 esac
 
 case "$${PLUTO_VERB}" in
   up-client)
-    ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
+    # CRITICAL OUTBOUND FIX: Explicitly bind the interface token key to the static mark schema passed by Terraform
+    ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${VTI_MARK}"
     ip link set "$${VTI_IF}" up
     
     ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
@@ -234,11 +236,6 @@ $IPSEC_BIN stop || true
 sleep 1
 $IPSEC_BIN start
 sleep 5
-
-# FIX: Restored background connection triggers to guarantee handshake execution loops fire immediately
-%{ for i, t in tunnels ~}
-$IPSEC_BIN up strongSwan-vpn-IKEv2-${i+1} >/dev/null 2>&1 &
-%{ endfor ~}
 
 # ─── 11. Synchronous Operational Health Check Gate ───
 echo "============================================================"
