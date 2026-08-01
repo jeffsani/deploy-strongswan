@@ -82,6 +82,7 @@ INTERFACES="$${WAN_IF_1}"
 
 INTERFACES=$(echo "$INTERFACES" | sed 's/^,//;s/,$//')
 
+# FIX: Stripped non-existent package-manager include wildcards that were crashing source charon builds
 cat > /etc/strongswan.conf << EOF
 charon {
   load_modular = yes
@@ -94,11 +95,7 @@ if [ -n "$INTERFACES" ]; then
 fi
 
 cat >> /etc/strongswan.conf << EOF
-  plugins {
-    include strongswan.d/charon/*.conf
-  }
 }
-include strongswan.d/*.conf
 EOF
 
 # ─── 5. Configure /etc/ipsec.conf ───
@@ -118,7 +115,7 @@ conn %default
   keyingtries=%forever
 
 %{ for i, t in tunnels ~}
-conn strongSwan-vpn-${i+1}
+conn strongSwan-vpn-IKEv2-${i+1}
   auto=start
   type=tunnel
   fragmentation=yes
@@ -151,7 +148,7 @@ EOF
 # Priority 5 forces host management traffic to skip tunnel routing entirely
 ip rule add ipproto tcp sport 22 lookup main priority 5 2>/dev/null || true
 
-# LOOP PREVENTION FIX: Priority 20 forces outer encrypted ESP packets to bypass VTIs and hit the real internet gateway
+# LOOP PREVENTION: Priority 20 forces outer encrypted ESP packets to bypass VTIs and hit the real internet gateway
 %{ for i, t in tunnels ~}
 ip rule add to ${t.remote_ip} lookup main priority 20 2>/dev/null || true
 %{ endfor ~}
@@ -165,7 +162,7 @@ set -o errexit
 
 case "$${PLUTO_CONNECTION}" in
 %{ for i, t in tunnels ~}
-  *vpn-${i+1}*)
+  *vpn-IKEv2-${i+1}*)
     VTI_IF="${t.vti_if}"
     LOCAL_WAN_IP="${t.local_ip}"
     CUSTOMER_IP="${t.customer_ip}"
@@ -220,16 +217,13 @@ fi
 iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387
 
-# ─── 10. Boot strongSwan Daemon & Force Initiation ───
+# ─── 10. Boot strongSwan Daemon ───
 IPSEC_BIN=$(command -v ipsec || echo "/usr/local/sbin/ipsec")
-$IPSEC_BIN restart
-
-sleep 2
-
-# Parallel tunnel initiation using standard background processing
-%{ for i, t in tunnels ~}
-$IPSEC_BIN up strongSwan-vpn-${i+1} >/dev/null 2>&1 &
-%{ endfor ~}
+# Use clean stop/start structure to accommodate systems where starter daemon was stuck or non-existent
+$IPSEC_BIN stop || true
+sleep 1
+$IPSEC_BIN start
+sleep 5
 
 # ─── 11. Synchronous Operational Health Check Gate ───
 echo "============================================================"
@@ -245,7 +239,7 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
   ALL_ESTABLISHED=true
   
   %{ for i, t in tunnels ~}
-  if ! echo "$CURRENT_STATUS" | grep -q "strongSwan-vpn-${i+1}.*ESTABLISHED"; then
+  if ! echo "$CURRENT_STATUS" | grep -q "strongSwan-vpn-IKEv2-${i+1}.*ESTABLISHED"; then
     ALL_ESTABLISHED=false
   fi
   %{ endfor ~}
