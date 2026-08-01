@@ -46,11 +46,17 @@ else
   exit 1
 fi
 
-# ─── 2. Kernel IP Forwarding ───
+# ─── 2. Kernel IP Forwarding & Module Activation ───
 echo "Enabling Kernel IP Forwarding..."
 sysctl -w net.ipv4.ip_forward=1
 if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
   echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+fi
+
+echo "Loading VTI kernel modules..."
+modprobe ip_vti
+if ! grep -q "ip_vti" /etc/modules; then
+  echo "ip_vti" >> /etc/modules
 fi
 
 # ─── 3. Idempotent strongSwan 6 Installation Gating & Swap Allocation ───
@@ -159,119 +165,67 @@ cat > /etc/ipsec.secrets << 'EOF'
 %{ endfor ~}
 EOF
 
-# ─── 7. Define Explicit Policy Routing Table & SSH Protection ───
+# ─── 7. Base Safety Gate Policies ───
 ip rule add ipproto tcp sport 22 lookup main priority 5 2>/dev/null || true
-
 %{ for i, t in tunnels ~}
 ip rule add to ${t.remote_ip} lookup main priority 20 2>/dev/null || true
 %{ endfor ~}
 
-# ─── 8. Configure /etc/strongswan.d/ipsec-vti.sh ───
+# ─── 8. Declarative Network Framework Initialization ───
+# Pre-build all networking structures so they exist predictably before the daemon reads them
+%{ for i, t in tunnels ~}
+ip tunnel del "${t.vti_if}" 2>/dev/null || true
+ip tunnel add "${t.vti_if}" mode vti local "${t.local_ip}" remote "${t.remote_ip}" key "${t.mark}"
+ip link set "${t.vti_if}" up
+ip addr add "${t.customer_ip}/31" dev "${t.vti_if}"
+
+sysctl -w "net.ipv4.conf.${t.vti_if}.disable_policy=1"
+sysctl -w "net.ipv4.conf.${t.vti_if}.rp_filter=0"
+
+if ! grep -q "${t.rt_table} table_${t.vti_if}" /etc/iproute2/rt_tables; then
+  echo "${t.rt_table} table_${t.vti_if}" >> /etc/iproute2/rt_tables
+fi
+ip route replace default dev "${t.vti_if}" table "${t.rt_table}"
+
+# High-priority symmetric check reply pinning rule
+ip rule add from "${t.customer_ip}/32" lookup "${t.rt_table}" priority $((70 + ${i})) 2>/dev/null || true
+
+# Dynamic Priorities (81, 82, 83...) construct a sequential active/passive failover chain
+if [ "${tunnel_flow_traffic_only}" = "true" ]; then
+  ip rule add to 162.159.65.1/32 lookup "${t.rt_table}" priority $((80 + ${i})) 2>/dev/null || true
+else
+  ip rule add from 192.168.15.0/24 lookup "${t.rt_table}" priority $((80 + ${i})) 2>/dev/null || true
+fi
+%{ endfor ~}
+
+# ─── 9. Build Runtime Up/Down Dynamic Link Failure Bouncer ───
 mkdir -p /etc/strongswan.d
 cat > /etc/strongswan.d/ipsec-vti.sh << 'VTISCRIPT'
 #!/bin/bash
 set -o nounset
-set -o errexit
 
-case "$${PLUTO_CONNECTION}" in
+case "${PLUTO_CONNECTION}" in
 %{ for i, t in tunnels ~}
   *vpn-IKEv2-${i+1}*)
     VTI_IF="${t.vti_if}"
-    LOCAL_WAN_IP="${t.local_ip}"
-    CUSTOMER_IP="${t.customer_ip}"
-    RT_TABLE="${t.rt_table}"
-    VTI_MARK="${t.mark}"
-    PRIORITY_HEALTH=$((70 + ${i}))
     ;;
 %{ endfor ~}
   *)
     VTI_IF="vti1"
-    LOCAL_WAN_IP="${remote_wan_ip_1}"
-    CUSTOMER_IP="${tunnels[0].customer_ip}"
-    RT_TABLE="${tunnels[0].rt_table}"
-    VTI_MARK="${tunnels[0].mark}"
-    PRIORITY_HEALTH=71
     ;;
 esac
 
-case "$${PLUTO_VERB}" in
+case "${PLUTO_VERB}" in
   up-client)
-    ip tunnel del "$${VTI_IF}" 2>/dev/null || true
-    ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${VTI_MARK}"
-    ip link set "$${VTI_IF}" up
-    
-    # FIX: Only bind the clean private /31 allocation. Removed the redundant host WAN IP assignment.
-    ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
-    
-    sysctl -w "net.ipv4.conf.$${VTI_IF}.disable_policy=1"
-    sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
-    sysctl -w "net.ipv4.conf.all.rp_filter=0"
-    
-    if ! grep -q "$${RT_TABLE} table_$${VTI_IF}" /etc/iproute2/rt_tables; then
-      echo "$${RT_TABLE} table_$${VTI_IF}" >> /etc/iproute2/rt_tables
-    fi
-    if ! grep -q "77 vti_ecmp" /etc/iproute2/rt_tables; then
-      echo "77 vti_ecmp" >> /etc/iproute2/rt_tables
-    fi
-    
-    # Discrete interface fallback route
-    ip route add default dev "$${VTI_IF}" table "$${RT_TABLE}" 2>/dev/null || true
-    
-    # Symmetric health-check reply pinning rule
-    ip rule add from "$${CUSTOMER_IP}/32" lookup "$${RT_TABLE}" priority "$${PRIORITY_HEALTH}" 2>/dev/null || true
-
-    # Dynamic ECMP Calculation block
-    echo "Recalculating ECMP Multipath route map..."
-    NEXTHOPS=""
-    for i in $$(seq 1 ${num_of_tunnels}); do
-      if ip link show "vti$${i}" 2>/dev/null | grep -q "UP"; then
-        C_IP=$$(ip -o -4 addr show "vti$${i}" | awk '{print $$4}' | grep "/31" | head -n 1 || true)
-        if [ -n "$$C_IP" ]; then
-          NEXTHOPS="$$NEXTHOPS nexthop dev vti$${i} weight 1"
-        fi
-      fi
-    done
-
-    if [ -n "$$NEXTHOPS" ]; then
-      ip route replace default table 77 $$NEXTHOPS
-    fi
-
-    # Bind selection targets to unified ECMP table
-    if [ "${tunnel_flow_traffic_only}" = "true" ]; then
-      ip rule add to 162.159.65.1/32 lookup 77 priority 80 2>/dev/null || true
-    else
-      ip rule add from 192.168.15.0/24 lookup 77 priority 80 2>/dev/null || true
-    fi
+    # Re-verify device link health state is active
+    ip link set "${VTI_IF}" up || true
     ;;
   down-client)
-    ip tunnel del "$${VTI_IF}" || true
-    ip rule del from "$${CUSTOMER_IP}/32" lookup "$${RT_TABLE}" priority "$${PRIORITY_HEALTH}" 2>/dev/null || true
-    
-    if [ "${tunnel_flow_traffic_only}" = "true" ]; then
-      ip rule del to 162.159.65.1/32 lookup 77 priority 80 2>/dev/null || true
-    else
-      ip rule del from 192.168.15.0/24 lookup 77 priority 80 2>/dev/null || true
-    fi
-    sudo sed -i "/table_$${VTI_IF}/d" /etc/iproute2/rt_tables || true
-    
-    NEXTHOPS=""
-    for i in $$(seq 1 ${num_of_tunnels}); do
-      if ip link show "vti$${i}" 2>/dev/null | grep -q "UP"; then
-        C_IP=$$(ip -o -4 addr show "vti$${i}" | awk '{print $$4}' | grep "/31" | head -n 1 || true)
-        if [ -n "$$C_IP" ]; then
-          NEXTHOPS="$$NEXTHOPS nexthop dev vti$${i} weight 1"
-        fi
-      fi
-    done
-
-    if [ -n "$$NEXTHOPS" ]; then
-      ip route replace default table 77 $$NEXTHOPS
-    else
-      ip route del default table 77 2>/dev/null || true
-    fi
+    # CRITICAL FAILOVER ACTIVATOR: Drop the device interface to force the kernel to flush its routes
+    # This automatically drops the traffic onto the next active priority rule slot in the chain
+    ip link set "${VTI_IF}" down || true
     ;;
 esac
-echo "VTI interface status changed successfully"
 VTISCRIPT
 
 chmod +x /etc/strongswan.d/ipsec-vti.sh
@@ -279,18 +233,18 @@ if command -v chcon >/dev/null 2>&1; then
   chcon -t bin_t /etc/strongswan.d/ipsec-vti.sh 2>/dev/null || true
 fi
 
-# ─── 9. Apply Firewall TCP MSS Clamping ───
+# ─── 10. Apply Firewall TCP MSS Clamping ───
 iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387
 
-# ─── 10. Boot strongSwan Daemon ───
+# ─── 11. Boot strongSwan Daemon ───
 IPSEC_BIN=$(command -v ipsec || echo "/usr/local/sbin/ipsec")
 $IPSEC_BIN stop || true
 sleep 1
 $IPSEC_BIN start
 sleep 5
 
-# ─── 11. Synchronous Operational Health Check Gate ───
+# ─── 12. Synchronous Operational Health Check Gate ───
 echo "============================================================"
 echo "Terraform Verification: Waiting for IPsec tunnels to establish..."
 echo "============================================================"
@@ -328,7 +282,7 @@ done
 echo "============================================================"
 echo "CRITICAL ERROR: Tunnels failed to establish within $${TIMEOUT} seconds."
 echo "Halting Terraform deployment state."
-echo "============================================================"
+echo "================────────────────────────────────────────────"
 echo "--- Diagnostic Log Dump ---"
 $IPSEC_BIN statusall || true
 echo "----------------------------"
