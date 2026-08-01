@@ -29,6 +29,8 @@ Handshakes are negotiated natively via the `stroke` backend using strict state-o
 
 ### 1. Internal Numeric Account ID (`cloudflare_internal_account_id`)
 Cloudflare requires Custom Remote FQDN Identities to match a backend schema incorporating your legacy, numeric account ID. This is **not** the standard 32-character hex account ID visible in dashboard URLs.
+* In the previous Terraform provider (v4.x and earlier), the `cloudflare_ipsec_tunnel` resource exposed computed `remote_id` and `user_id` attributes after tunnel creation. These contained the auto-generated FQDN identity (including the numeric account ID), so it never needed to be provided manually.
+* In the current provider (v5.x), the resource was renamed to `cloudflare_magic_wan_ipsec_tunnel` and these computed attributes were **removed**. The FQDN identity must now be constructed manually via the `custom_remote_identities.fqdn_id` input, which requires knowing the numeric account ID upfront.
 * The numeric account ID is not readily discoverable from the Cloudflare Dashboard. Contact your Cloudflare account team or support to obtain this value.
 
 ### 2. Tunnel Interface Subnet Constraints
