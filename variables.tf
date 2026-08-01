@@ -1,5 +1,5 @@
-variable "cloudflare_account_id" { 
-  type = string
+variable "cloudflare_account_id" {
+  type        = string
   description = "Cloudflare Account ID"
 }
 
@@ -9,45 +9,45 @@ variable "cloudflare_internal_account_id" {
 }
 
 variable "cloudflare_anycast_ip_1" {
-  type = string
+  type        = string
   description = "First Cloudflare Magic Transit Anycast IP"
 }
 
 variable "cloudflare_anycast_ip_2" {
-  type = string
+  type        = string
   description = "Second Cloudflare Magic Transit Anycast IP"
 }
 
 variable "remote_wan_ip_1" {
-  type = string
+  type        = string
   description = "The primary public WAN IP of the remote customer endpoint"
 }
 
 variable "remote_wan_ip_2" {
-  type = string
+  type        = string
   description = "The secondary public WAN IP of the remote customer endpoint (required if num_of_tunnels is 4)"
 }
 
 variable "cloudflare_api_token" {
-  type      = string
+  type        = string
   description = "Cloudflare API Token"
-  sensitive = true
+  sensitive   = true
 }
 
-variable "ssh_user" { 
-  type    = string
+variable "ssh_user" {
+  type        = string
   description = "SSH username for the remote host"
-  default = "terraform" 
+  default     = "terraform"
 }
 
-variable "ssh_private_key" { 
-  type      = string
+variable "ssh_private_key" {
+  type        = string
   description = "SSH private key for the remote host"
-  sensitive = true 
+  sensitive   = true
 }
 
 # --- Tunnel Endpoints ---
-variable "tunnel_interface_prefix_base" { 
+variable "tunnel_interface_prefix_base" {
   type        = string
   description = "The base /31 CIDR block to use for the first tunnel"
 }

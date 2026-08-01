@@ -29,7 +29,7 @@ if [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then
   fi
 
 elif [[ "$OS_ID" == "ol" || "$OS_ID" == "rhel" || "$OS_ID" == "rocky" || "$OS_ID" == "almalinux" || "$OS_ID" == "centos" ]]; then
-  dnf install -y gcc make gmp-devel openssl-devel iptables iproute wget bzip2 tar
+  dnf install -y gcc make gmp-devel openssl-devel iptables iproute wget bzip2 tar perl
 
   if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
     echo "Configuring Firewalld to ALLOW transit forwarding and IPsec..."
@@ -49,14 +49,18 @@ fi
 # ─── 2. Kernel IP Forwarding & Module Activation ───
 echo "Enabling Kernel IP Forwarding..."
 sysctl -w net.ipv4.ip_forward=1
-if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
-  echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-fi
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-strongswan.conf
+sysctl --system
 
 echo "Loading VTI kernel modules..."
 modprobe ip_vti
-if ! grep -q "ip_vti" /etc/modules; then
-  echo "ip_vti" >> /etc/modules
+
+if [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then
+  if ! grep -q "ip_vti" /etc/modules 2>/dev/null; then
+    echo "ip_vti" >> /etc/modules
+  fi
+elif [[ "$OS_ID" == "ol" || "$OS_ID" == "rhel" || "$OS_ID" == "rocky" || "$OS_ID" == "almalinux" || "$OS_ID" == "centos" ]]; then
+  echo "ip_vti" > /etc/modules-load.d/ip_vti.conf
 fi
 
 # ─── 3. Idempotent strongSwan 6 Installation Gating & Swap Allocation ───

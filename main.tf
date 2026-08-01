@@ -55,10 +55,10 @@ resource "random_password" "psk" {
 resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   count = var.num_of_tunnels
 
-  account_id          = var.cloudflare_account_id
-  name                = "strongSwan-vpn-${count.index + 1}"
-  description         = count.index < 2 ? "Primary ISP to Anycast ${count.index % 2 + 1}" : "Secondary ISP to Anycast ${count.index % 2 + 1}"
-  
+  account_id  = var.cloudflare_account_id
+  name        = "strongSwan-vpn-${count.index + 1}"
+  description = count.index < 2 ? "Primary ISP to Anycast ${count.index % 2 + 1}" : "Secondary ISP to Anycast ${count.index % 2 + 1}"
+
   customer_endpoint   = count.index < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
   cloudflare_endpoint = count.index % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
   interface_address   = local.tunnel_ips[count.index]
@@ -70,7 +70,7 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
 
   health_check = {
     enabled   = true
-    type      = "request" 
+    type      = "request"
     direction = "bidirectional"
     rate      = "mid"
   }
@@ -84,7 +84,7 @@ resource "null_resource" "strongswan_install" {
     private_key  = var.ssh_private_key
     anycast_ip_1 = trimspace(var.cloudflare_anycast_ip_1)
     anycast_ip_2 = trimspace(var.cloudflare_anycast_ip_2)
-    
+
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
       num_of_tunnels                 = var.num_of_tunnels
       remote_wan_ip_1                = trimspace(var.remote_wan_ip_1)
@@ -173,6 +173,10 @@ resource "null_resource" "strongswan_install" {
       "sudo ip rule del priority 84 2>/dev/null || true",
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
+      "sudo rm -f /etc/modules-load.d/ip_vti.conf 2>/dev/null || true",
+      "sudo sed -i '/ip_vti/d' /etc/modules 2>/dev/null || true",
+      "sudo rm -f /etc/sysctl.d/99-strongswan.conf 2>/dev/null || true",
+      "sudo sysctl --system 2>/dev/null || true",
       "echo 'strongSwan configuration successfully removed.'"
     ]
   }

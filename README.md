@@ -17,6 +17,25 @@ The module orchestrates a mesh of dynamic IPsec tunnels utilizing standard Linux
 * **Tunnel 3:** Secondary ISP Interface ──> Cloudflare Anycast Endpoint 1 (If `num_of_tunnels = 4`)
 * **Tunnel 4:** Secondary ISP Interface ──> Cloudflare Anycast Endpoint 2 (If `num_of_tunnels = 4`)
 
+## Supported Operating Systems
+
+The installation script auto-detects the Linux distribution and adapts package management, firewall configuration, and kernel module persistence accordingly. The following distributions are tested and supported:
+
+| Distribution Family | Supported Versions |
+|---|---|
+| **Ubuntu** | 22.04 LTS (Jammy Jellyfish), 24.04 LTS |
+| **Debian** | 11 (Bullseye), 12 (Bookworm) |
+| **RHEL** | 9.x |
+| **Rocky Linux** | 9.x |
+| **AlmaLinux** | 9.x |
+| **Oracle Linux** | 9.x |
+| **CentOS Stream** | 9 |
+
+**Distro-specific behavior:**
+* **Debian/Ubuntu:** Dependencies installed via `apt-get`. Firewall managed through `ufw` (if present). Kernel module persistence via `/etc/modules`.
+* **RHEL-family:** Dependencies installed via `dnf`. Firewall managed through `firewalld` (if active) with `iptables` fallback. Kernel module persistence via `/etc/modules-load.d/`. SELinux contexts applied automatically where applicable.
+* **Both:** strongSwan 6.0.7 is compiled from source. IP forwarding persisted via `/etc/sysctl.d/99-strongswan.conf`.
+
 ## ⚡ Post-Quantum Cryptographic Suite
 
 Handshakes are negotiated natively via the `stroke` backend using strict state-of-the-art parameters:
@@ -48,3 +67,6 @@ Because the installation script places a broad routing table rule (`from <public
 * **The Safety Gate:** To prevent your active SSH deployment session from being broken or swallowed by the tunnel payload, the script establishes a top-tier safety rule inside the kernel database at **Priority 5**:
   ```bash
   ip rule add ipproto tcp sport 22 lookup main priority 5
+  ```
+* This ensures all outbound TCP traffic from port 22 (SSH replies) always uses the `main` routing table instead of being redirected through the VTI tunnels.
+* **Do not remove this rule** while managing the server remotely over SSH. If it is deleted, your SSH session will be captured by the tunnel routing and you will lose connectivity to the host.
