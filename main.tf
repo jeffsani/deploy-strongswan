@@ -36,7 +36,6 @@ locals {
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 6}/${local.prefix}"
   ]
 
-  # Increments by 1 to isolate the discrete customer-side host IPs within the /31 blocks
   customer_ips = [
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 1}",
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 3}",
@@ -65,6 +64,11 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   interface_address   = local.tunnel_ips[count.index]
   psk                 = random_password.psk[count.index].result
 
+  # Explicitly register the custom FQDN to guarantee successful matching on shared IPs
+  custom_remote_identities = {
+    fqdn_id = "vpn${count.index + 1}.${var.cloudflare_internal_account_id}.custom.ipsec.cloudflare.com"
+  }
+
   health_check = {
     enabled   = true
     type      = "reply"
@@ -81,9 +85,10 @@ resource "null_resource" "strongswan_install" {
     private_key = var.ssh_private_key
     
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
-      num_of_tunnels  = var.num_of_tunnels
-      remote_wan_ip_1 = trimspace(var.remote_wan_ip_1)
-      remote_wan_ip_2 = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
+      num_of_tunnels                = var.num_of_tunnels
+      remote_wan_ip_1               = trimspace(var.remote_wan_ip_1)
+      remote_wan_ip_2               = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
+      cloudflare_internal_account_id = var.cloudflare_internal_account_id
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           psk         = random_password.psk[i].result
@@ -106,14 +111,15 @@ resource "null_resource" "strongswan_install" {
 
   provisioner "file" {
     content = templatefile("${path.module}/templates/strongswan.sh.tpl", {
-      num_of_tunnels  = var.num_of_tunnels
-      remote_wan_ip_1 = trimspace(var.remote_wan_ip_1)
-      remote_wan_ip_2 = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
+      num_of_tunnels                = var.num_of_tunnels
+      remote_wan_ip_1               = trimspace(var.remote_wan_ip_1)
+      remote_wan_ip_2               = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
+      cloudflare_internal_account_id = var.cloudflare_internal_account_id
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           psk         = random_password.psk[i].result
           local_ip    = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
-          remote_ip = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
+          remote_ip   = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
           customer_ip = local.customer_ips[i]
           vti_if      = "vti${i}"
           mark        = 41 + i
