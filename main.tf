@@ -163,6 +163,10 @@ resource "null_resource" "strongswan_install" {
       "sudo ip rule del to ${self.triggers.anycast_ip_2} lookup main 2>/dev/null || true",
       "sudo ip rule del to 162.159.65.1/32 2>/dev/null || true",
       "sudo ip rule del from 192.168.15.0/24 2>/dev/null || true",
+      "sudo ip rule del priority 90 2>/dev/null || true",
+      "sudo ip rule del priority 91 2>/dev/null || true",
+      "sudo ip rule del priority 92 2>/dev/null || true",
+      "sudo ip rule del priority 93 2>/dev/null || true",
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
       "echo 'strongSwan configuration successfully removed.'"
