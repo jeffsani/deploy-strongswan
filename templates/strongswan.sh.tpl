@@ -181,6 +181,7 @@ case "$${PLUTO_CONNECTION}" in
     CUSTOMER_IP="${t.customer_ip}"
     RT_TABLE="${t.rt_table}"
     VTI_MARK="${t.mark}"
+    PRIORITY_NUM=$((80 + ${i}))
     ;;
 %{ endfor ~}
   *)
@@ -189,12 +190,12 @@ case "$${PLUTO_CONNECTION}" in
     CUSTOMER_IP="${tunnels[0].customer_ip}"
     RT_TABLE="${tunnels[0].rt_table}"
     VTI_MARK="${tunnels[0].mark}"
+    PRIORITY_NUM=80
     ;;
 esac
 
 case "$${PLUTO_VERB}" in
   up-client)
-    # FIX: Purge any pre-existing cached interfaces to ensure keys are explicitly applied
     ip tunnel del "$${VTI_IF}" 2>/dev/null || true
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${VTI_MARK}"
     ip link set "$${VTI_IF}" up
@@ -210,12 +211,30 @@ case "$${PLUTO_VERB}" in
       echo "$${RT_TABLE} table_$${VTI_IF}" >> /etc/iproute2/rt_tables
     fi
     
+    # Core Health Check Rule
     ip rule add from $${LOCAL_WAN_IP} lookup "$${RT_TABLE}" priority 100 2>/dev/null || true
     ip route add default dev "$${VTI_IF}" table "$${RT_TABLE}" 2>/dev/null || true
+    
+    # ─── Dynamic Condition Selector Logic ───
+    if [ "${tunnel_flow_traffic_only}" = "true" ]; then
+      # Mode 1: Intercept ONLY Flow Telemetry Traffic (Anycast Target IP)
+      echo "Routing configuration: Directing ONLY flow logging destination 162.159.65.1 to $${VTI_IF}"
+      ip rule add to 162.159.65.1/32 lookup "$${RT_TABLE}" priority "$${PRIORITY_NUM}" 2>/dev/null || true
+    else
+      # Mode 2: Intercept ALL traffic from local LAN subnet (Acts as local default gateway)
+      echo "Routing configuration: Directing ALL transit traffic from LAN 192.168.15.0/24 to $${VTI_IF}"
+      ip rule add from 192.168.15.0/24 lookup "$${RT_TABLE}" priority "$${PRIORITY_NUM}" 2>/dev/null || true
+    fi
     ;;
   down-client)
     ip tunnel del "$${VTI_IF}" || true
     ip rule del from $${LOCAL_WAN_IP} lookup "$${RT_TABLE}" priority 100 2>/dev/null || true
+    
+    if [ "${tunnel_flow_traffic_only}" = "true" ]; then
+      ip rule del to 162.159.65.1/32 lookup "$${RT_TABLE}" priority "$${PRIORITY_NUM}" 2>/dev/null || true
+    else
+      ip rule del from 192.168.15.0/24 lookup "$${RT_TABLE}" priority "$${PRIORITY_NUM}" 2>/dev/null || true
+    fi
     sudo sed -i "/table_$${VTI_IF}/d" /etc/iproute2/rt_tables || true
     ;;
 esac
