@@ -59,7 +59,6 @@ if command -v ipsec >/dev/null 2>&1 && ipsec --version 2>&1 | grep -q "6.0.7" &&
 else
   echo "strongSwan 6.0.7 or swanctl utility missing or mismatched. Proceeding with compilation from source..."
   
-  # MEMORY SAFETY LAYER: Allocate a temporary swap file to protect GCC from OOM during PQ calculation compile
   TRIGGERED_SWAP=false
   if [ ! -f /swapfile ] && [ $(free -m | awk '/Mem:/ {print $2}') -le 2048 ]; then
     echo "Low physical memory profile detected. Engineering a temporary 2GB swap space to stabilize GCC..."
@@ -82,7 +81,6 @@ else
   cd /tmp
   rm -rf strongswan-6.0.7 strongswan-6.0.7.tar.bz2
 
-  # Tear down swap file cleanly if we built it to preserve SSD endurance
   if [ "$TRIGGERED_SWAP" = true ]; then
     echo "Compilation secure. De-allocating temporary swap safety valve..."
     swapoff /swapfile || true
@@ -101,9 +99,9 @@ INTERFACES="$${WAN_IF_1}"
 
 INTERFACES=$(echo "$INTERFACES" | sed 's/^,//;s/,$//')
 
+# FIX: Omitted load_modular entirely so charon natively falls back to auto-loading all compiled-in plugins
 cat > /etc/strongswan.conf << EOF
 charon {
-  load_modular = yes
   install_routes = no
   install_virtual_ip = no
 EOF
@@ -236,6 +234,11 @@ $IPSEC_BIN stop || true
 sleep 1
 $IPSEC_BIN start
 sleep 5
+
+# FIX: Restored background connection triggers to guarantee handshake execution loops fire immediately
+%{ for i, t in tunnels ~}
+$IPSEC_BIN up strongSwan-vpn-IKEv2-${i+1} >/dev/null 2>&1 &
+%{ endfor ~}
 
 # ─── 11. Synchronous Operational Health Check Gate ───
 echo "============================================================"
