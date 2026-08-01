@@ -181,7 +181,7 @@ case "$${PLUTO_CONNECTION}" in
     CUSTOMER_IP="${t.customer_ip}"
     RT_TABLE="${t.rt_table}"
     VTI_MARK="${t.mark}"
-    PRIORITY_HEALTH=$((70 + ${i})) # Evaluated FIRST to guarantee health check return pinning
+    PRIORITY_HEALTH=$((70 + ${i}))
     ;;
 %{ endfor ~}
   *)
@@ -200,8 +200,8 @@ case "$${PLUTO_VERB}" in
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${VTI_MARK}"
     ip link set "$${VTI_IF}" up
     
+    # FIX: Only bind the clean private /31 allocation. Removed the redundant host WAN IP assignment.
     ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
-    ip addr add "$${LOCAL_WAN_IP}/32" dev "$${VTI_IF}" || true
     
     sysctl -w "net.ipv4.conf.$${VTI_IF}.disable_policy=1"
     sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
@@ -214,19 +214,17 @@ case "$${PLUTO_VERB}" in
       echo "77 vti_ecmp" >> /etc/iproute2/rt_tables
     fi
     
-    # 1. Discrete Interface Table Escape Route
+    # Discrete interface fallback route
     ip route add default dev "$${VTI_IF}" table "$${RT_TABLE}" 2>/dev/null || true
     
-    # 2. SYMMETRIC PROBE PINNING: Evaluated at high priority (71-74) to guarantee replies go out where they arrived
+    # Symmetric health-check reply pinning rule
     ip rule add from "$${CUSTOMER_IP}/32" lookup "$${RT_TABLE}" priority "$${PRIORITY_HEALTH}" 2>/dev/null || true
-    ip rule add from "$${LOCAL_WAN_IP}/32" lookup "$${RT_TABLE}" priority 100 2>/dev/null || true
 
-    # 3. DYNAMIC ECMP GROUP RE-CALCULATION
+    # Dynamic ECMP Calculation block
     echo "Recalculating ECMP Multipath route map..."
     NEXTHOPS=""
     for i in $$(seq 1 ${num_of_tunnels}); do
       if ip link show "vti$${i}" 2>/dev/null | grep -q "UP"; then
-        # Check if the interface actually possesses an assigned customer IP state
         C_IP=$$(ip -o -4 addr show "vti$${i}" | awk '{print $$4}' | grep "/31" | head -n 1 || true)
         if [ -n "$$C_IP" ]; then
           NEXTHOPS="$$NEXTHOPS nexthop dev vti$${i} weight 1"
@@ -238,7 +236,7 @@ case "$${PLUTO_VERB}" in
       ip route replace default table 77 $$NEXTHOPS
     fi
 
-    # 4. Bind Selection Target to Unified ECMP Table
+    # Bind selection targets to unified ECMP table
     if [ "${tunnel_flow_traffic_only}" = "true" ]; then
       ip rule add to 162.159.65.1/32 lookup 77 priority 80 2>/dev/null || true
     else
@@ -248,10 +246,14 @@ case "$${PLUTO_VERB}" in
   down-client)
     ip tunnel del "$${VTI_IF}" || true
     ip rule del from "$${CUSTOMER_IP}/32" lookup "$${RT_TABLE}" priority "$${PRIORITY_HEALTH}" 2>/dev/null || true
-    ip rule del from "$${LOCAL_WAN_IP}/32" lookup "$${RT_TABLE}" priority 100 2>/dev/null || true
+    
+    if [ "${tunnel_flow_traffic_only}" = "true" ]; then
+      ip rule del to 162.159.65.1/32 lookup 77 priority 80 2>/dev/null || true
+    else
+      ip rule del from 192.168.15.0/24 lookup 77 priority 80 2>/dev/null || true
+    fi
     sudo sed -i "/table_$${VTI_IF}/d" /etc/iproute2/rt_tables || true
     
-    # RE-CALCULATE MULTIPATH DEGRADATION STATE
     NEXTHOPS=""
     for i in $$(seq 1 ${num_of_tunnels}); do
       if ip link show "vti$${i}" 2>/dev/null | grep -q "UP"; then
@@ -266,7 +268,6 @@ case "$${PLUTO_VERB}" in
       ip route replace default table 77 $$NEXTHOPS
     else
       ip route del default table 77 2>/dev/null || true
-      ip rule del lookup 77 priority 80 2>/dev/null || true
     fi
     ;;
 esac
