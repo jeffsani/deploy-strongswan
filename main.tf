@@ -68,9 +68,10 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
     fqdn_id = "vpn${count.index + 1}.${var.cloudflare_internal_account_id}.custom.ipsec.cloudflare.com"
   }
 
+  # FIX: Configured to Request style so Linux registers standard inbound echo requests
   health_check = {
     enabled   = true
-    type      = "reply"
+    type      = "request" 
     direction = "bidirectional"
     rate      = "mid"
   }
