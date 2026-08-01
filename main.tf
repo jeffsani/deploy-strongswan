@@ -19,7 +19,7 @@ provider "cloudflare" {
   api_token = var.cloudflare_api_token
 }
 
-# Math logic to increment the 4th octet by 2 for each subsequent tunnel
+# Math logic to calculate both the tunnel allocations and the customer host IPs
 locals {
   base_ip = split("/", var.tunnel_interface_prefix_base)[0]
   prefix  = split("/", var.tunnel_interface_prefix_base)[1]
@@ -34,6 +34,14 @@ locals {
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 2}/${local.prefix}",
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 4}/${local.prefix}",
     "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 6}/${local.prefix}"
+  ]
+
+  # Increments by 1 to isolate the discrete customer-side host IPs within the /31 blocks
+  customer_ips = [
+    "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 1}",
+    "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 3}",
+    "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 5}",
+    "${local.o1}.${local.o2}.${local.o3}.${local.o4 + 7}"
   ]
 }
 
@@ -52,13 +60,11 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   name                = "strongSwan-vpn-${count.index + 1}"
   description         = count.index < 2 ? "Primary ISP to Anycast ${count.index % 2 + 1}" : "Secondary ISP to Anycast ${count.index % 2 + 1}"
   
-  # Defend against variable newline spacing using trimspace
   customer_endpoint   = count.index < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
   cloudflare_endpoint = count.index % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
   interface_address   = local.tunnel_ips[count.index]
   psk                 = random_password.psk[count.index].result
 
-  # Natively uses inner interface routing. Target can be omitted when bidirectional.
   health_check = {
     enabled   = true
     type      = "reply"
@@ -80,11 +86,12 @@ resource "null_resource" "strongswan_install" {
       remote_wan_ip_2 = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
-          psk       = random_password.psk[i].result
-          local_ip  = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
-          remote_ip = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
-          vti_if    = "vti${i}"
-          mark      = 41 + i
+          psk         = random_password.psk[i].result
+          local_ip    = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
+          remote_ip   = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
+          customer_ip = local.customer_ips[i]
+          vti_if      = "vti${i}"
+          mark        = 41 + i
         }
       ]
     }))
@@ -104,11 +111,12 @@ resource "null_resource" "strongswan_install" {
       remote_wan_ip_2 = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
-          psk       = random_password.psk[i].result
-          local_ip  = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
+          psk         = random_password.psk[i].result
+          local_ip    = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
           remote_ip = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
-          vti_if    = "vti${i}"
-          mark      = 41 + i
+          customer_ip = local.customer_ips[i]
+          vti_if      = "vti${i}"
+          mark        = 41 + i
         }
       ]
     })
@@ -121,7 +129,6 @@ resource "null_resource" "strongswan_install" {
     ]
   }
 
-  # Graceful architecture strip down on resource destruction
   provisioner "remote-exec" {
     when = destroy
     inline = [
