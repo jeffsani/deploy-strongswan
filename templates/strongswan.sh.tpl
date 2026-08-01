@@ -172,7 +172,6 @@ ip rule add to ${t.remote_ip} lookup main priority 20 2>/dev/null || true
 %{ endfor ~}
 
 # ─── 8. Declarative Network Framework Initialization ───
-# Pre-build all networking structures so they exist predictably before the daemon reads them
 %{ for i, t in tunnels ~}
 ip tunnel del "${t.vti_if}" 2>/dev/null || true
 ip tunnel add "${t.vti_if}" mode vti local "${t.local_ip}" remote "${t.remote_ip}" key "${t.mark}"
@@ -190,7 +189,6 @@ ip route replace default dev "${t.vti_if}" table "${t.rt_table}"
 # High-priority symmetric check reply pinning rule
 ip rule add from "${t.customer_ip}/32" lookup "${t.rt_table}" priority $((70 + ${i})) 2>/dev/null || true
 
-# Dynamic Priorities (81, 82, 83...) construct a sequential active/passive failover chain
 if [ "${tunnel_flow_traffic_only}" = "true" ]; then
   ip rule add to 162.159.65.1/32 lookup "${t.rt_table}" priority $((80 + ${i})) 2>/dev/null || true
 else
@@ -204,7 +202,8 @@ cat > /etc/strongswan.d/ipsec-vti.sh << 'VTISCRIPT'
 #!/bin/bash
 set -o nounset
 
-case "${PLUTO_CONNECTION}" in
+# FIX: Applied double dollar escapes ($$) to keep Bash engine vars clear of Terraform interpolation
+case "$${PLUTO_CONNECTION}" in
 %{ for i, t in tunnels ~}
   *vpn-IKEv2-${i+1}*)
     VTI_IF="${t.vti_if}"
@@ -215,15 +214,12 @@ case "${PLUTO_CONNECTION}" in
     ;;
 esac
 
-case "${PLUTO_VERB}" in
+case "$${PLUTO_VERB}" in
   up-client)
-    # Re-verify device link health state is active
-    ip link set "${VTI_IF}" up || true
+    ip link set "$${VTI_IF}" up || true
     ;;
   down-client)
-    # CRITICAL FAILOVER ACTIVATOR: Drop the device interface to force the kernel to flush its routes
-    # This automatically drops the traffic onto the next active priority rule slot in the chain
-    ip link set "${VTI_IF}" down || true
+    ip link set "$${VTI_IF}" down || true
     ;;
 esac
 VTISCRIPT
