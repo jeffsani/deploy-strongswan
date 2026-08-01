@@ -52,18 +52,18 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   name                = "strongSwan-vpn-${count.index + 1}"
   description         = count.index < 2 ? "Primary ISP to Anycast ${count.index % 2 + 1}" : "Secondary ISP to Anycast ${count.index % 2 + 1}"
   
-  # Defend against UI newlines natively using trimspace
+  # Defend against variable newline spacing using trimspace
   customer_endpoint   = count.index < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
   cloudflare_endpoint = count.index % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
   interface_address   = local.tunnel_ips[count.index]
   psk                 = random_password.psk[count.index].result
 
+  # Natively uses inner interface routing. Target can be omitted when bidirectional.
   health_check = {
     enabled   = true
-    type      = "request"
-    direction = "unidirectional"
+    type      = "reply"
+    direction = "bidirectional"
     rate      = "mid"
-    target    = { saved = try(var.health_check_targets[count.index], count.index < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)) }
   }
 }
 
@@ -121,6 +121,7 @@ resource "null_resource" "strongswan_install" {
     ]
   }
 
+  # Graceful architecture strip down on resource destruction
   provisioner "remote-exec" {
     when = destroy
     inline = [
@@ -137,6 +138,7 @@ resource "null_resource" "strongswan_install" {
       "sudo ip tunnel del vti3 || true",
       "sudo ip route del default table viatunicmp 2>/dev/null || true",
       "sudo ip rule del lookup viatunicmp 2>/dev/null || true",
+      "sudo ip rule del ipproto tcp sport 22 lookup main 2>/dev/null || true",
       "sudo sed -i '/200 viatunicmp/d' /etc/iproute2/rt_tables || true",
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
