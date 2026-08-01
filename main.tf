@@ -78,10 +78,13 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
 
 # Remote execution on the instance
 resource "null_resource" "strongswan_install" {
+  # FIX: Store values inside the triggers map so the destroy provisioner can legally reference them
   triggers = {
-    remote_ip   = trimspace(var.remote_wan_ip_1)
-    ssh_user    = var.ssh_user
-    private_key = var.ssh_private_key
+    remote_ip    = trimspace(var.remote_wan_ip_1)
+    ssh_user     = var.ssh_user
+    private_key  = var.ssh_private_key
+    anycast_ip_1 = trimspace(var.cloudflare_anycast_ip_1)
+    anycast_ip_2 = trimspace(var.cloudflare_anycast_ip_2)
     
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
       num_of_tunnels                 = var.num_of_tunnels
@@ -155,8 +158,8 @@ resource "null_resource" "strongswan_install" {
       "sudo ip rule del lookup 12 2>/dev/null || true",
       "sudo ip rule del lookup 13 2>/dev/null || true",
       "sudo ip rule del ipproto tcp sport 22 lookup main 2>/dev/null || true",
-      "sudo ip rule del to ${trimspace(var.cloudflare_anycast_ip_1)} lookup main 2>/dev/null || true",
-      "sudo ip rule del to ${trimspace(var.cloudflare_anycast_ip_2)} lookup main 2>/dev/null || true",
+      "sudo ip rule del to ${self.triggers.anycast_ip_1} lookup main 2>/dev/null || true", # FIX: Use self.triggers instead of var
+      "sudo ip rule del to ${self.triggers.anycast_ip_2} lookup main 2>/dev/null || true", # FIX: Use self.triggers instead of var
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
       "echo 'strongSwan configuration successfully removed.'"
