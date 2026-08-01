@@ -147,12 +147,8 @@ cat > /etc/ipsec.secrets << 'EOF'
 %{ endfor ~}
 EOF
 
-# ─── 7. Define Explicit Policy Routing Table & SSH Protection ───
-if ! grep -q "viatunicmp" /etc/iproute2/rt_tables; then
-  echo "200 viatunicmp" >> /etc/iproute2/rt_tables
-fi
-
-# Safety Net: Priority 5 forces host management traffic to skip the tunnel rule completely
+# ─── 7. SSH Safety Rule ───
+# Priority 5 forces host management traffic to skip tunnel routing entirely
 ip rule add ipproto tcp sport 22 lookup main priority 5 2>/dev/null || true
 
 # ─── 8. Configure /etc/strongswan.d/ipsec-vti.sh ───
@@ -168,12 +164,14 @@ case "$${PLUTO_CONNECTION}" in
     VTI_IF="${t.vti_if}"
     LOCAL_WAN_IP="${t.local_ip}"
     CUSTOMER_IP="${t.customer_ip}"
+    RT_TABLE="${t.rt_table}"
     ;;
 %{ endfor ~}
   *)
-    VTI_IF="vti0"
+    VTI_IF="vti1"
     LOCAL_WAN_IP="${remote_wan_ip_1}"
     CUSTOMER_IP="${tunnels[0].customer_ip}"
+    RT_TABLE="${tunnels[0].rt_table}"
     ;;
 esac
 
@@ -182,7 +180,7 @@ case "$${PLUTO_VERB}" in
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
     
-    # Assign private customer-side IP to the interface so Linux naturally acknowledges bidirectional probers
+    # Assign private customer-side IP to the interface so Linux acknowledges bidirectional probers
     ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
     ip addr add "$${LOCAL_WAN_IP}/32" dev "$${VTI_IF}" || true
     
@@ -190,14 +188,19 @@ case "$${PLUTO_VERB}" in
     sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
     sysctl -w "net.ipv4.conf.all.rp_filter=0"
     
+    # Initialize the custom discrete routing table dynamically for this specific tunnel interface
+    if ! grep -q "$${RT_TABLE} table_$${VTI_IF}" /etc/iproute2/rt_tables; then
+      echo "$${RT_TABLE} table_$${VTI_IF}" >> /etc/iproute2/rt_tables
+    fi
+    
     # Priority 100 sits safely below the Priority 5 SSH safety gate
-    ip rule add from $${LOCAL_WAN_IP} lookup viatunicmp priority 100 2>/dev/null || true
-    ip route add default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
+    ip rule add from $${LOCAL_WAN_IP} lookup "$${RT_TABLE}" priority 100 2>/dev/null || true
+    ip route add default dev "$${VTI_IF}" table "$${RT_TABLE}" 2>/dev/null || true
     ;;
   down-client)
     ip tunnel del "$${VTI_IF}" || true
-    ip route del default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
-    ip rule del from $${LOCAL_WAN_IP} lookup viatunicmp priority 100 2>/dev/null || true
+    ip rule del from $${LOCAL_WAN_IP} lookup "$${RT_TABLE}" priority 100 2>/dev/null || true
+    sudo sed -i "/table_$${VTI_IF}/d" /etc/iproute2/rt_tables || true
     ;;
 esac
 echo "VTI interface status changed successfully"
