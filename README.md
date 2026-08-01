@@ -27,11 +27,9 @@ Handshakes are negotiated natively via the `stroke` backend using strict state-o
 
 ## ⚠️ Critical Deployment Requirements & Gotchas
 
-### 1. How to Find Your Internal Numeric Account ID (`cloudflare_internal_account_id`)
-Cloudflare requires Custom Remote FQDN Identities to match a backend schema incorporating your legacy, numeric account ID. This is separate from your standard 32-character hex account ID. To retrieve it:
-1. Log into the Cloudflare Dashboard.
-2. Select your account and go to **Manage Account** > **Billing**.
-3. Look at your browser's URL bar. The numeric string following `/billing/` (e.g., `29336597`) is your internal account identifier.
+### 1. Internal Numeric Account ID (`cloudflare_internal_account_id`)
+Cloudflare requires Custom Remote FQDN Identities to match a backend schema incorporating your legacy, numeric account ID. This is **not** the standard 32-character hex account ID visible in dashboard URLs.
+* The numeric account ID is not readily discoverable from the Cloudflare Dashboard. Contact your Cloudflare account team or support to obtain this value.
 
 ### 2. Tunnel Interface Subnet Constraints
 The Cloudflare network API strictly validates the inner interface transit address space block provided via `tunnel_interface_prefix_base`.
@@ -39,7 +37,7 @@ The Cloudflare network API strictly validates the inner interface transit addres
 * **Example Failure:** Providing a public block such as `172.120.15.2/31` will trigger an immediate `400 Bad Request` from Cloudflare checkers. Use an explicitly private layout like `172.20.15.2/31`.
 
 ### 3. Bidirectional Tunnel Health Probing
-Tunnels utilize **bidirectional health checks** (`type = "reply"`). Cloudflare bypasses external tracking and probes the *inner customer-side private IP* directly within the encrypted VTI tunnel.
+Tunnels utilize **bidirectional health checks** (`type = "request"`). Cloudflare probes the *inner customer-side private IP* directly within the encrypted VTI tunnel. Request-style checks are used because reply-style checks are bounced by the Linux kernel.
 * The module mathematically extracts the inner host IP (e.g., the odd IP `.3` within a `/31` layout) and binds it natively to the `vtiX` interfaces.
 * **Do not remove or overlay these bound private addresses.** If the Linux kernel cannot explicitly resolve these IPs inside the VTIs, the prober will report 100% packet loss and flag the link as dead.
 
