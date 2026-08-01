@@ -143,10 +143,13 @@ ${t.local_ip} : PSK "${t.psk}"
 %{ endfor ~}
 EOF
 
-# ─── 7. Define Explicit Policy Routing Table ───
+# ─── 7. Define Explicit Policy Routing Table & SSH Protection ───
 if ! grep -q "viatunicmp" /etc/iproute2/rt_tables; then
   echo "200 viatunicmp" >> /etc/iproute2/rt_tables
 fi
+
+# CRITICAL FIX: Exclude SSH control packets from being thrown into the Magic WAN policy routing engine
+ip rule add ipproto tcp sport 22 lookup main priority 10 2>/dev/null || true
 
 # ─── 8. Configure /etc/strongswan.d/ipsec-vti.sh ───
 mkdir -p /etc/strongswan.d
