@@ -148,7 +148,7 @@ if ! grep -q "viatunicmp" /etc/iproute2/rt_tables; then
   echo "200 viatunicmp" >> /etc/iproute2/rt_tables
 fi
 
-# CRITICAL FIX: Exclude SSH control packets from being thrown into the Magic WAN policy routing engine
+# Protect active and future SSH control sessions from being swallowed by the VTI policy routing engine
 ip rule add ipproto tcp sport 22 lookup main priority 10 2>/dev/null || true
 
 # ─── 8. Configure /etc/strongswan.d/ipsec-vti.sh ───
@@ -163,11 +163,13 @@ case "$${PLUTO_CONNECTION}" in
   *vpn-${i+1}*)
     VTI_IF="${t.vti_if}"
     LOCAL_WAN_IP="${t.local_ip}"
+    CUSTOMER_IP="${t.customer_ip}"
     ;;
 %{ endfor ~}
   *)
     VTI_IF="vti0"
     LOCAL_WAN_IP="${remote_wan_ip_1}"
+    CUSTOMER_IP="${tunnels[0].customer_ip}"
     ;;
 esac
 
@@ -175,7 +177,10 @@ case "$${PLUTO_VERB}" in
   up-client)
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
-    ip addr add $${LOCAL_WAN_IP}/32 dev "$${VTI_IF}" || true
+    
+    # CRITICAL FIX: Assign the private customer-side IP to the interface so Linux naturally acknowledges and replies to inside probes
+    ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
+    ip addr add "$${LOCAL_WAN_IP}/32" dev "$${VTI_IF}" || true
     
     sysctl -w "net.ipv4.conf.$${VTI_IF}.disable_policy=1"
     sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
