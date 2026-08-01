@@ -53,24 +53,41 @@ if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
   echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 fi
 
-# ─── 3. Idempotent strongSwan 6 Installation Gating ───
+# ─── 3. Idempotent strongSwan 6 Installation Gating & Swap Allocation ───
 if command -v ipsec >/dev/null 2>&1 && ipsec --version 2>&1 | grep -q "6.0.7" && command -v swanctl >/dev/null 2>&1; then
   echo "strongSwan 6.0.7 and swanctl utility are already installed and optimized. Skipping compilation phase."
 else
   echo "strongSwan 6.0.7 or swanctl utility missing or mismatched. Proceeding with compilation from source..."
+  
+  # MEMORY SAFETY LAYER: Allocate a temporary swap file to protect GCC from OOM during PQ calculation compile
+  TRIGGERED_SWAP=false
+  if [ ! -f /swapfile ] && [ $(free -m | awk '/Mem:/ {print $2}') -le 2048 ]; then
+    echo "Low physical memory profile detected. Engineering a temporary 2GB swap space to stabilize GCC..."
+    fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    TRIGGERED_SWAP=true
+  fi
+
   cd /tmp
   wget -q https://download.strongswan.org/strongswan-6.0.7.tar.bz2
   tar -xjf strongswan-6.0.7.tar.bz2
   cd strongswan-6.0.7
 
   ./configure --prefix=/usr --sysconfdir=/etc --enable-ml --enable-openssl --enable-stroke --enable-swanctl
-  
-  # CRITICAL RESOURCE FIX: Single-threaded compilation prevents OOM killer execution drops
   make
   make install
 
   cd /tmp
   rm -rf strongswan-6.0.7 strongswan-6.0.7.tar.bz2
+
+  # Tear down swap file cleanly if we built it to preserve SSD endurance
+  if [ "$TRIGGERED_SWAP" = true ]; then
+    echo "Compilation secure. De-allocating temporary swap safety valve..."
+    swapoff /swapfile || true
+    rm -f /swapfile || true
+  fi
 fi
 
 # ─── 4. Configure /etc/strongswan.conf ───
