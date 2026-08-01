@@ -51,7 +51,7 @@ resource "random_password" "psk" {
   special = false
 }
 
-# Cloudflare Magic WAN / Transit Tunnels
+# Cloudflare WAN / Transit Tunnels
 resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   count = var.num_of_tunnels
 
@@ -64,7 +64,6 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   interface_address   = local.tunnel_ips[count.index]
   psk                 = random_password.psk[count.index].result
 
-  # Explicitly register the custom FQDN to guarantee successful matching on shared IPs
   custom_remote_identities = {
     fqdn_id = "vpn${count.index + 1}.${var.cloudflare_internal_account_id}.custom.ipsec.cloudflare.com"
   }
@@ -85,9 +84,9 @@ resource "null_resource" "strongswan_install" {
     private_key = var.ssh_private_key
     
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
-      num_of_tunnels                = var.num_of_tunnels
-      remote_wan_ip_1               = trimspace(var.remote_wan_ip_1)
-      remote_wan_ip_2               = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
+      num_of_tunnels                 = var.num_of_tunnels
+      remote_wan_ip_1                = trimspace(var.remote_wan_ip_1)
+      remote_wan_ip_2                = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       cloudflare_internal_account_id = var.cloudflare_internal_account_id
       tunnels = [
         for i in range(var.num_of_tunnels) : {
@@ -95,7 +94,8 @@ resource "null_resource" "strongswan_install" {
           local_ip    = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
           remote_ip   = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
           customer_ip = local.customer_ips[i]
-          vti_if      = "vti${i}"
+          vti_if      = "vti${i + 1}" # Shifted to start at vti1 to avoid master conflict zone
+          rt_table    = 10 + i        # Discrete routing tables per tunnel to avoid collisions
           mark        = 41 + i
         }
       ]
@@ -111,9 +111,9 @@ resource "null_resource" "strongswan_install" {
 
   provisioner "file" {
     content = templatefile("${path.module}/templates/strongswan.sh.tpl", {
-      num_of_tunnels                = var.num_of_tunnels
-      remote_wan_ip_1               = trimspace(var.remote_wan_ip_1)
-      remote_wan_ip_2               = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
+      num_of_tunnels                 = var.num_of_tunnels
+      remote_wan_ip_1                = trimspace(var.remote_wan_ip_1)
+      remote_wan_ip_2                = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       cloudflare_internal_account_id = var.cloudflare_internal_account_id
       tunnels = [
         for i in range(var.num_of_tunnels) : {
@@ -121,7 +121,8 @@ resource "null_resource" "strongswan_install" {
           local_ip    = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
           remote_ip   = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
           customer_ip = local.customer_ips[i]
-          vti_if      = "vti${i}"
+          vti_if      = "vti${i + 1}"
+          rt_table    = 10 + i
           mark        = 41 + i
         }
       ]
@@ -141,18 +142,19 @@ resource "null_resource" "strongswan_install" {
       "echo 'Starting strongSwan teardown...'",
       "IPSEC_BIN=$(command -v ipsec || echo \"/usr/local/sbin/ipsec\")",
       "sudo $IPSEC_BIN stop || true",
-      "sudo ip link set vti0 down || true",
-      "sudo ip tunnel del vti0 || true",
       "sudo ip link set vti1 down || true",
       "sudo ip tunnel del vti1 || true",
       "sudo ip link set vti2 down || true",
       "sudo ip tunnel del vti2 || true",
       "sudo ip link set vti3 down || true",
       "sudo ip tunnel del vti3 || true",
-      "sudo ip route del default table viatunicmp 2>/dev/null || true",
-      "sudo ip rule del lookup viatunicmp 2>/dev/null || true",
+      "sudo ip link set vti4 down || true",
+      "sudo ip tunnel del vti4 || true",
+      "sudo ip rule del lookup 10 2>/dev/null || true",
+      "sudo ip rule del lookup 11 2>/dev/null || true",
+      "sudo ip rule del lookup 12 2>/dev/null || true",
+      "sudo ip rule del lookup 13 2>/dev/null || true",
       "sudo ip rule del ipproto tcp sport 22 lookup main 2>/dev/null || true",
-      "sudo sed -i '/200 viatunicmp/d' /etc/iproute2/rt_tables || true",
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
       "echo 'strongSwan configuration successfully removed.'"
