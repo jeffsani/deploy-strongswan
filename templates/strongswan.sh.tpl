@@ -142,8 +142,8 @@ EOF
 
 # ─── 6. Configure /etc/ipsec.secrets ───
 cat > /etc/ipsec.secrets << 'EOF'
-%{ for t in tunnels ~}
-@vpn${loop.index+1}.${cloudflare_internal_account_id}.custom.ipsec.cloudflare.com : PSK "${t.psk}"
+%{ for i, t in tunnels ~}
+@vpn${i+1}.${cloudflare_internal_account_id}.custom.ipsec.cloudflare.com : PSK "${t.psk}"
 %{ endfor ~}
 EOF
 
@@ -152,7 +152,7 @@ if ! grep -q "viatunicmp" /etc/iproute2/rt_tables; then
   echo "200 viatunicmp" >> /etc/iproute2/rt_tables
 fi
 
-# CRITICAL FIX: Evaluated at priority 5 to override the broad WAN IP rules
+# Safety Net: Priority 5 forces host management traffic to skip the tunnel rule completely
 ip rule add ipproto tcp sport 22 lookup main priority 5 2>/dev/null || true
 
 # ─── 8. Configure /etc/strongswan.d/ipsec-vti.sh ───
@@ -182,7 +182,7 @@ case "$${PLUTO_VERB}" in
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
     
-    # Assign the private customer-side IP to the interface so Linux naturally acknowledges bidirectional probers
+    # Assign private customer-side IP to the interface so Linux naturally acknowledges bidirectional probers
     ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
     ip addr add "$${LOCAL_WAN_IP}/32" dev "$${VTI_IF}" || true
     
@@ -190,7 +190,7 @@ case "$${PLUTO_VERB}" in
     sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
     sysctl -w "net.ipv4.conf.all.rp_filter=0"
     
-    # Deterministic Priority 100 sits safely below the Priority 5 SSH safety gate
+    # Priority 100 sits safely below the Priority 5 SSH safety gate
     ip rule add from $${LOCAL_WAN_IP} lookup viatunicmp priority 100 2>/dev/null || true
     ip route add default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
     ;;
@@ -218,7 +218,7 @@ $IPSEC_BIN restart
 
 sleep 2
 
-# CRITICAL FIX: Standard Linux background processing instead of an invalid argument flag
+# Parallel tunnel initiation using standard background processing
 %{ for i, t in tunnels ~}
 $IPSEC_BIN up strongSwan-vpn-${i+1} >/dev/null 2>&1 &
 %{ endfor ~}
