@@ -194,7 +194,8 @@ esac
 
 case "$${PLUTO_VERB}" in
   up-client)
-    # CRITICAL OUTBOUND FIX: Explicitly bind the interface token key to the static mark schema passed by Terraform
+    # FIX: Purge any pre-existing cached interfaces to ensure keys are explicitly applied
+    ip tunnel del "$${VTI_IF}" 2>/dev/null || true
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${VTI_MARK}"
     ip link set "$${VTI_IF}" up
     
