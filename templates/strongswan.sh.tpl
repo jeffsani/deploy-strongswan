@@ -53,19 +53,23 @@ if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
   echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 fi
 
-# ─── 3. Compile strongSwan 6 from Source ───
-echo "Compiling strongSwan 6..."
-cd /tmp
-wget -q https://download.strongswan.org/strongswan-6.0.7.tar.bz2
-tar -xjf strongswan-6.0.7.tar.bz2
-cd strongswan-6.0.7
+# ─── 3. Idempotent strongSwan 6 Installation Gating ───
+if command -v ipsec >/dev/null 2>&1 && ipsec --version 2>&1 | grep -q "6.0.7"; then
+  echo "strongSwan 6.0.7 is already installed and optimized. Skipping compilation phase."
+else
+  echo "strongSwan 6.0.7 not found or mismatched. Proceeding with compilation from source..."
+  cd /tmp
+  wget -q https://download.strongswan.org/strongswan-6.0.7.tar.bz2
+  tar -xjf strongswan-6.0.7.tar.bz2
+  cd strongswan-6.0.7
 
-./configure --prefix=/usr --sysconfdir=/etc --enable-ml --enable-openssl --enable-stroke
-make -j$(nproc)
-make install
+  ./configure --prefix=/usr --sysconfdir=/etc --enable-ml --enable-openssl --enable-stroke
+  make -j$(nproc)
+  make install
 
-cd /tmp
-rm -rf strongswan-6.0.7 strongswan-6.0.7.tar.bz2
+  cd /tmp
+  rm -rf strongswan-6.0.7 strongswan-6.0.7.tar.bz2
+fi
 
 # ─── 4. Configure /etc/strongswan.conf ───
 WAN_IF_1=$(ip -o addr show | grep "${remote_wan_ip_1}" | awk '{print $2}' | head -n 1 || true)
@@ -148,7 +152,7 @@ if ! grep -q "viatunicmp" /etc/iproute2/rt_tables; then
   echo "200 viatunicmp" >> /etc/iproute2/rt_tables
 fi
 
-# CRITICAL FIX: Explicitly use priority 5 so this executes BEFORE the tunnel routing rule
+# CRITICAL SAFETY NET: Priority 5 forces host management traffic to skip the tunnel rule completely
 ip rule add ipproto tcp sport 22 lookup main priority 5 2>/dev/null || true
 
 # ─── 8. Configure /etc/strongswan.d/ipsec-vti.sh ───
@@ -178,7 +182,7 @@ case "$${PLUTO_VERB}" in
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
     
-    # CRITICAL FIX: Assign the private customer-side IP to the interface so Linux acknowledges and replies to bidirectional probes
+    # Assign the private customer-side IP to the interface so Linux naturally acknowledges bidirectional probers
     ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
     ip addr add "$${LOCAL_WAN_IP}/32" dev "$${VTI_IF}" || true
     
@@ -186,17 +190,14 @@ case "$${PLUTO_VERB}" in
     sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
     sysctl -w "net.ipv4.conf.all.rp_filter=0"
     
-    ip rule add from $${LOCAL_WAN_IP} lookup viatunicmp 2>/dev/null || true
+    # Deterministic Priority 100 sits safely below the Priority 5 SSH safety gate
+    ip rule add from $${LOCAL_WAN_IP} lookup viatunicmp priority 100 2>/dev/null || true
     ip route add default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
     ;;
   down-client)
     ip tunnel del "$${VTI_IF}" || true
     ip route del default dev "$${VTI_IF}" table viatunicmp 2>/dev/null || true
-    
-    ACTIVE_VTIS=$(ip tunnel show 2>/dev/null | grep -c "local $${LOCAL_WAN_IP}" || true)
-    if [ "$ACTIVE_VTIS" -eq 0 ]; then
-      ip rule del from $${LOCAL_WAN_IP} lookup viatunicmp 2>/dev/null || true
-    fi
+    ip rule del from $${LOCAL_WAN_IP} lookup viatunicmp priority 100 2>/dev/null || true
     ;;
 esac
 echo "VTI interface status changed successfully"
