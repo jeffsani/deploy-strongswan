@@ -68,7 +68,6 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
     fqdn_id = "vpn${count.index + 1}.${var.cloudflare_internal_account_id}.custom.ipsec.cloudflare.com"
   }
 
-  # FIX: Configured to Request style so Linux registers standard inbound echo requests
   health_check = {
     enabled   = true
     type      = "request" 
@@ -159,15 +158,17 @@ resource "null_resource" "strongswan_install" {
       "sudo ip rule del lookup 11 2>/dev/null || true",
       "sudo ip rule del lookup 12 2>/dev/null || true",
       "sudo ip rule del lookup 13 2>/dev/null || true",
+      "sudo ip rule del lookup 77 2>/dev/null || true",
       "sudo ip rule del ipproto tcp sport 22 lookup main 2>/dev/null || true",
       "sudo ip rule del to ${self.triggers.anycast_ip_1} lookup main 2>/dev/null || true",
       "sudo ip rule del to ${self.triggers.anycast_ip_2} lookup main 2>/dev/null || true",
       "sudo ip rule del to 162.159.65.1/32 2>/dev/null || true",
       "sudo ip rule del from 192.168.15.0/24 2>/dev/null || true",
-      "sudo ip rule del priority 90 2>/dev/null || true",
-      "sudo ip rule del priority 91 2>/dev/null || true",
-      "sudo ip rule del priority 92 2>/dev/null || true",
-      "sudo ip rule del priority 93 2>/dev/null || true",
+      "sudo ip rule del priority 71 2>/dev/null || true",
+      "sudo ip rule del priority 72 2>/dev/null || true",
+      "sudo ip rule del priority 73 2>/dev/null || true",
+      "sudo ip rule del priority 74 2>/dev/null || true",
+      "sudo ip rule del priority 80 2>/dev/null || true",
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
       "echo 'strongSwan configuration successfully removed.'"
