@@ -1,6 +1,6 @@
-# Cloudflare Magic WAN Multi-ISP for strongSwan 6
+# Cloudflare WAN Multi-ISP for strongSwan 6
 
-This Terraform module automates the deployment of a highly available, multi-ISP, Anycast-routed network topology connecting an on-premises Linux edge gateway running **strongSwan 6** directly to **Cloudflare Magic WAN**. 
+This Terraform module automates the deployment of a highly available, multi-ISP, Anycast-routed network topology connecting an on-premises Linux edge gateway running **strongSwan 6** directly to **Cloudflare WAN**. 
 
 The configuration utilizes next-generation **Post-Quantum Hybrid Cryptography** to safeguard data transit tunnels against future decryption vectors.
 
