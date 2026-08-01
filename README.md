@@ -1,6 +1,6 @@
-<p align="center">
+<div align="center">
   <img src="strongswan.png" alt="strongSwan" width="50%" />
-</p>
+</div>
 
 # Cloudflare WAN Multi-ISP for strongSwan 6 
 
