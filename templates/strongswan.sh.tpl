@@ -54,17 +54,19 @@ if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
 fi
 
 # ─── 3. Idempotent strongSwan 6 Installation Gating ───
-if command -v ipsec >/dev/null 2>&1 && ipsec --version 2>&1 | grep -q "6.0.7"; then
-  echo "strongSwan 6.0.7 is already installed and optimized. Skipping compilation phase."
+if command -v ipsec >/dev/null 2>&1 && ipsec --version 2>&1 | grep -q "6.0.7" && command -v swanctl >/dev/null 2>&1; then
+  echo "strongSwan 6.0.7 and swanctl utility are already installed and optimized. Skipping compilation phase."
 else
-  echo "strongSwan 6.0.7 not found or mismatched. Proceeding with compilation from source..."
+  echo "strongSwan 6.0.7 or swanctl utility missing or mismatched. Proceeding with compilation from source..."
   cd /tmp
   wget -q https://download.strongswan.org/strongswan-6.0.7.tar.bz2
   tar -xjf strongswan-6.0.7.tar.bz2
   cd strongswan-6.0.7
 
-  ./configure --prefix=/usr --sysconfdir=/etc --enable-ml --enable-openssl --enable-stroke
-  make -j$(nproc)
+  ./configure --prefix=/usr --sysconfdir=/etc --enable-ml --enable-openssl --enable-stroke --enable-swanctl
+  
+  # CRITICAL RESOURCE FIX: Single-threaded compilation prevents OOM killer execution drops
+  make
   make install
 
   cd /tmp
@@ -82,7 +84,6 @@ INTERFACES="$${WAN_IF_1}"
 
 INTERFACES=$(echo "$INTERFACES" | sed 's/^,//;s/,$//')
 
-# FIX: Stripped non-existent package-manager include wildcards that were crashing source charon builds
 cat > /etc/strongswan.conf << EOF
 charon {
   load_modular = yes
@@ -145,10 +146,8 @@ cat > /etc/ipsec.secrets << 'EOF'
 EOF
 
 # ─── 7. Define Explicit Policy Routing Table & SSH Protection ───
-# Priority 5 forces host management traffic to skip tunnel routing entirely
 ip rule add ipproto tcp sport 22 lookup main priority 5 2>/dev/null || true
 
-# LOOP PREVENTION: Priority 20 forces outer encrypted ESP packets to bypass VTIs and hit the real internet gateway
 %{ for i, t in tunnels ~}
 ip rule add to ${t.remote_ip} lookup main priority 20 2>/dev/null || true
 %{ endfor ~}
@@ -182,7 +181,6 @@ case "$${PLUTO_VERB}" in
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
     
-    # Assign the private customer-side IP to the interface so Linux acknowledges bidirectional probers
     ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
     ip addr add "$${LOCAL_WAN_IP}/32" dev "$${VTI_IF}" || true
     
@@ -190,12 +188,10 @@ case "$${PLUTO_VERB}" in
     sysctl -w "net.ipv4.conf.$${VTI_IF}.rp_filter=0"
     sysctl -w "net.ipv4.conf.all.rp_filter=0"
     
-    # Initialize the custom discrete routing table dynamically for this specific tunnel interface
     if ! grep -q "$${RT_TABLE} table_$${VTI_IF}" /etc/iproute2/rt_tables; then
       echo "$${RT_TABLE} table_$${VTI_IF}" >> /etc/iproute2/rt_tables
     fi
     
-    # Priority 100 sits safely below the Priority 5 and Priority 20 safety gates
     ip rule add from $${LOCAL_WAN_IP} lookup "$${RT_TABLE}" priority 100 2>/dev/null || true
     ip route add default dev "$${VTI_IF}" table "$${RT_TABLE}" 2>/dev/null || true
     ;;
@@ -219,7 +215,6 @@ iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss
 
 # ─── 10. Boot strongSwan Daemon ───
 IPSEC_BIN=$(command -v ipsec || echo "/usr/local/sbin/ipsec")
-# Use clean stop/start structure to accommodate systems where starter daemon was stuck or non-existent
 $IPSEC_BIN stop || true
 sleep 1
 $IPSEC_BIN start
@@ -249,6 +244,9 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
     echo "SUCCESS: All Post-Quantum tunnels are securely ESTABLISHED!"
     echo "------------------------------------------------------------"
     $IPSEC_BIN status
+    echo ""
+    echo "--- swanctl Modern Status Map ---"
+    swanctl --list-sas || true
     exit 0
   fi
   
