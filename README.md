@@ -1,35 +1,40 @@
-# Cloudflare Magic WAN Post-Quantum IPsec Deployment with strongSwan
+# Cloudflare Magic WAN Multi-ISP for strongSwan 6
 
-This Terraform module automates the deployment of 2 or 4 Cloudflare Magic WAN IPsec tunnels to a remote Linux instance (Ubuntu, Debian, RHEL, or Oracle Linux). It securely negotiates hybrid post-quantum cryptography (ML-KEM / ECP384) with strict AES-GCM Phase 1 and Phase 2 encryption using **[strongSwan v6+](https://strongswan.org/)**.
+This Terraform module automates the deployment of a highly available, multi-ISP, Anycast-routed network topology connecting an on-premises Linux edge gateway running **strongSwan 6** directly to **Cloudflare Magic WAN**. 
 
-## Architecture
+The configuration utilizes next-generation **Post-Quantum Hybrid Cryptography** to safeguard data transit tunnels against future decryption vectors.
 
-This deployment supports dynamic scaling based on your ISP links:
-*   **2 Tunnels:** For a single public WAN connection, establishing primary and secondary Anycast connections.
-*   **4 Tunnels:** For dual public WAN connections (discrete ISP links), establishing redundant connections across both WANs.
+## 🏗️ Architecture Blueprint
 
-The deployment handles all inner VTI (Virtual Tunnel Interface) routing, TCP MSS clamping, and kernel-level IP forwarding dynamically. Because post-quantum cryptography requires strongSwan v6+, the remote execution script automatically downloads, compiles, and installs the latest strongSwan 6 release from source.
+The module orchestrates a mesh of dynamic IPsec tunnels utilizing standard Linux Virtual Tunnel Interfaces (VTIs) and policy routing configurations:
 
-## Prerequisites
+* **Tunnel 1:** Primary ISP Interface ──> Cloudflare Anycast Endpoint 1
+* **Tunnel 2:** Primary ISP Interface ──> Cloudflare Anycast Endpoint 2
+* **Tunnel 3:** Secondary ISP Interface ──> Cloudflare Anycast Endpoint 1 (If `num_of_tunnels = 4`)
+* **Tunnel 4:** Secondary ISP Interface ──> Cloudflare Anycast Endpoint 2 (If `num_of_tunnels = 4`)
 
-*   Terraform v1.0+
-*   A Cloudflare account with Magic WAN provisioned.
-*   A target Linux machine reachable via SSH.
-*   The target machine must allow inbound UDP port 500 and 4500 from the Cloudflare Anycast IPs.
+## ⚡ Post-Quantum Cryptographic Suite
 
-## Host Preparation
+Handshakes are negotiated natively via the `stroke` backend using strict state-of-the-art parameters:
+* **IKE Phase 1:** `aes256gcm16-sha256-ecp384-ke1_mlkem768!` (NIST Round 4 Post-Quantum ML-KEM Key Exchange)
+* **ESP Phase 2:** `aes256gcm16-ecp384!` (Authenticated GCM-mode Encryption)
 
-Terraform utilizes a remote-exec provisioner over SSH to build strongSwan from source and configure the routing table. Because the script executes root-level networking commands, the `ssh_user` you define **must** have passwordless sudo privileges and key-based authentication pre-configured.
+---
 
-### Option A: Cloud-Init (Recommended)
-If you are deploying your Linux instances in a cloud environment (AWS, GCP, Azure, Oracle), inject this User-Data payload at boot to properly stage the `terraform` user:
+## ⚠️ Critical Deployment Requirements & Gotchas
 
-```yaml
-#cloud-config
-users:
-  - name: terraform
-    groups: [wheel, sudo]
-    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
-    shell: /bin/bash
-    ssh_authorized_keys:
-      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC... (Your Public Key Here)
+### 1. Tunnel Interface Subnet Constraints
+The Cloudflare network API strictly validates the inner interface transit address space block provided via `tunnel_interface_prefix_base`.
+* **Private Range Validation:** The target subnet **must** fall inside valid RFC 1918 private blocks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) or Link-Local space (`169.254.0.0/16`).
+* **Example Failure:** Providing a public block such as `172.120.15.2/31` will trigger an immediate `400 Bad Request` from Cloudflare checkers. Use an explicitly private layout like `172.20.15.2/31`.
+
+### 2. Bidirectional Tunnel Health Probing
+Tunnels utilize **bidirectional health checks** (`type = "reply"`). Cloudflare bypasses external tracking and probes the *inner customer-side private IP* directly within the encrypted VTI tunnel.
+* The module mathematically extracts the inner host IP (e.g., the odd IP `.3` within a `/31` layout) and binds it natively to the `vtiX` interfaces.
+* **Do not remove or overlay these bound private addresses.** If the Linux kernel cannot explicitly resolve these IPs inside the VTIs, the prober will report 100% packet loss and flag the link as dead.
+
+### 3. Policy Routing Asymmetry & SSH Protection
+Because the installation script places a broad routing table rule (`from <public_ip> lookup viatunicmp`) on the edge server to route data plane packets through Magic WAN, it risks intercepting management plane traffic.
+* **The Safety Gate:** To prevent your active SSH deployment session from being broken or swallowed by the tunnel payload, the script establishes a top-tier safety rule inside the kernel database at **Priority 5**:
+  ```bash
+  ip rule add ipproto tcp sport 22 lookup main priority 5
