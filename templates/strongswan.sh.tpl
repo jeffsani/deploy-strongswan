@@ -147,9 +147,14 @@ cat > /etc/ipsec.secrets << 'EOF'
 %{ endfor ~}
 EOF
 
-# ─── 7. SSH Safety Rule ───
+# ─── 7. Define Explicit Policy Routing Table & SSH Protection ───
 # Priority 5 forces host management traffic to skip tunnel routing entirely
 ip rule add ipproto tcp sport 22 lookup main priority 5 2>/dev/null || true
+
+# LOOP PREVENTION FIX: Priority 20 forces outer encrypted ESP packets to bypass VTIs and hit the real internet gateway
+%{ for i, t in tunnels ~}
+ip rule add to ${t.remote_ip} lookup main priority 20 2>/dev/null || true
+%{ endfor ~}
 
 # ─── 8. Configure /etc/strongswan.d/ipsec-vti.sh ───
 mkdir -p /etc/strongswan.d
@@ -180,7 +185,7 @@ case "$${PLUTO_VERB}" in
     ip tunnel add "$${VTI_IF}" local "$${PLUTO_ME}" remote "$${PLUTO_PEER}" mode vti key "$${PLUTO_MARK_OUT%%/*}"
     ip link set "$${VTI_IF}" up
     
-    # Assign private customer-side IP to the interface so Linux acknowledges bidirectional probers
+    # Assign the private customer-side IP to the interface so Linux acknowledges bidirectional probers
     ip addr add "$${CUSTOMER_IP}/31" dev "$${VTI_IF}" || true
     ip addr add "$${LOCAL_WAN_IP}/32" dev "$${VTI_IF}" || true
     
@@ -193,7 +198,7 @@ case "$${PLUTO_VERB}" in
       echo "$${RT_TABLE} table_$${VTI_IF}" >> /etc/iproute2/rt_tables
     fi
     
-    # Priority 100 sits safely below the Priority 5 SSH safety gate
+    # Priority 100 sits safely below the Priority 5 and Priority 20 safety gates
     ip rule add from $${LOCAL_WAN_IP} lookup "$${RT_TABLE}" priority 100 2>/dev/null || true
     ip route add default dev "$${VTI_IF}" table "$${RT_TABLE}" 2>/dev/null || true
     ;;
