@@ -260,6 +260,10 @@ iptables -t nat -D POSTROUTING -d 162.159.65.1/32 -p udp --dport 2055 -j SNAT --
 iptables -t nat -D POSTROUTING -d 162.159.65.1/32 -p udp --dport 6343 -j SNAT --to-source ${tunnel_flow_nat_ip} 2>/dev/null || true
 iptables -t nat -A POSTROUTING -d 162.159.65.1/32 -p udp --dport 2055 -j SNAT --to-source ${tunnel_flow_nat_ip}
 iptables -t nat -A POSTROUTING -d 162.159.65.1/32 -p udp --dport 6343 -j SNAT --to-source ${tunnel_flow_nat_ip}
+# SNAT ICMP to flow collector so ping replies can be routed back through the tunnel
+# (without this, ICMP arrives at Cloudflare with an RFC 1918 VTI source IP and is dropped)
+iptables -t nat -D POSTROUTING -d 162.159.65.1/32 -p icmp -j SNAT --to-source ${tunnel_flow_nat_ip} 2>/dev/null || true
+iptables -t nat -A POSTROUTING -d 162.159.65.1/32 -p icmp -j SNAT --to-source ${tunnel_flow_nat_ip}
 %{ endif ~}
 
 # ─── 11. Boot strongSwan Daemon ───

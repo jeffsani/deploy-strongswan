@@ -87,6 +87,7 @@ When `tunnel_flow_traffic_only = true`, the tunnels are used exclusively to encr
 Set `tunnel_flow_nat_ip` to an IP within your protected prefix. The module will install iptables SNAT rules in the `nat` POSTROUTING chain to rewrite the source address of:
 * **NetFlow/IPFIX:** UDP destination port 2055
 * **sFlow:** UDP destination port 6343
+* **ICMP:** Ping/diagnostic traffic to the flow collector (without SNAT, ICMP arrives at Cloudflare with an RFC 1918 VTI source IP and is dropped)
 
 ```hcl
 tunnel_flow_traffic_only = true
