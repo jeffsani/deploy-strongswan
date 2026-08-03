@@ -69,3 +69,20 @@ Because the installation script places a broad routing table rule (`from <public
   ```
 * This ensures all outbound TCP traffic from port 22 (SSH replies) always uses the `main` routing table instead of being redirected through the VTI tunnels.
 * **Do not remove this rule** while managing the server remotely over SSH. If it is deleted, your SSH session will be captured by the tunnel routing and you will lose connectivity to the host.
+
+### 5. WAN Fallback & Tunnel Resilience
+The deployment includes two complementary mechanisms that ensure data-plane traffic automatically falls back to the WAN default gateway when IPsec tunnels are unavailable:
+
+* **Event-Driven Failover (`ipsec-vti.sh`):** The strongSwan `leftupdown` script reacts to SA state changes in real time. When a tunnel's CHILD_SA goes down (detected via Dead Peer Detection), the script removes the corresponding `ip rule` entries (priority 70+ and 80+) for that tunnel. With the policy routing rules removed, the Linux kernel falls through to the `main` routing table, which contains the original WAN default gateway. When the tunnel re-establishes, the rules are automatically re-added.
+
+* **Poll-Based Watchdog (`tunnel-watchdog.service`):** A systemd service polls `ipsec status` every 15 seconds to verify that `ip rule` state matches actual tunnel SA state. This acts as a safety net for edge cases where the updown script may not fire (e.g., strongSwan daemon crash, silent SA expiry). State transitions are logged via syslog (`tunnel-watchdog` tag) for operational visibility.
+
+**Failover behavior:**
+| Scenario | Result |
+|---|---|
+| Single tunnel down | Traffic shifts to the next available tunnel (inter-tunnel failover) |
+| All tunnels down | Traffic falls back to the WAN default gateway |
+| Tunnel recovers | Traffic is automatically steered back through the tunnel |
+| strongSwan daemon crash | Watchdog detects all tunnels as down, removes rules for WAN fallback |
+
+> **Note:** There is a brief black-hole window (up to ~30-150 seconds) between when a tunnel actually fails and when DPD detects the failure and triggers the updown script. The watchdog's 15-second poll interval provides a secondary detection path. To monitor failover events, check syslog: `journalctl -t tunnel-watchdog`.

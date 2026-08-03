@@ -211,19 +211,34 @@ case "$${PLUTO_CONNECTION}" in
 %{ for i, t in tunnels ~}
   *vpn-IKEv2-${i+1}*)
     VTI_IF="${t.vti_if}"
+    CUSTOMER_IP="${t.customer_ip}"
+    RT_TABLE="${t.rt_table}"
+    RULE_PRIORITY_HC=$((70 + ${i}))
+    RULE_PRIORITY_DP=$((80 + ${i}))
+%{ if tunnel_flow_traffic_only == "true" ~}
+    DP_RULE_MATCH="to 162.159.65.1/32"
+%{ else ~}
+    DP_RULE_MATCH="from 192.168.15.0/24"
+%{ endif ~}
     ;;
 %{ endfor ~}
   *)
-    VTI_IF="vti1"
+    exit 0
     ;;
 esac
 
 case "$${PLUTO_VERB}" in
   up-client)
     ip link set "$${VTI_IF}" up || true
+    # Re-add routing rules for this tunnel
+    ip rule add from "$${CUSTOMER_IP}/32" lookup "$${RT_TABLE}" priority "$${RULE_PRIORITY_HC}" 2>/dev/null || true
+    ip rule add $${DP_RULE_MATCH} lookup "$${RT_TABLE}" priority "$${RULE_PRIORITY_DP}" 2>/dev/null || true
     ;;
   down-client)
     ip link set "$${VTI_IF}" down || true
+    # Remove routing rules so traffic falls through to WAN
+    ip rule del from "$${CUSTOMER_IP}/32" lookup "$${RT_TABLE}" priority "$${RULE_PRIORITY_HC}" 2>/dev/null || true
+    ip rule del $${DP_RULE_MATCH} lookup "$${RT_TABLE}" priority "$${RULE_PRIORITY_DP}" 2>/dev/null || true
     ;;
 esac
 VTISCRIPT
@@ -244,7 +259,95 @@ sleep 1
 $IPSEC_BIN start
 sleep 5
 
-# ─── 12. Synchronous Operational Health Check Gate ───
+# ─── 12. Deploy Tunnel Health Watchdog Daemon ───
+cat > /etc/strongswan.d/tunnel-watchdog.sh << 'WATCHDOG'
+#!/bin/bash
+set -o nounset
+
+IPSEC_BIN=$(command -v ipsec || echo "/usr/local/sbin/ipsec")
+CHECK_INTERVAL=15
+LOG_TAG="tunnel-watchdog"
+
+# Tunnel definitions (baked in by Terraform template)
+declare -A TUNNEL_VTI TUNNEL_CUSTOMER_IP TUNNEL_RT_TABLE TUNNEL_HC_PRIO TUNNEL_DP_PRIO TUNNEL_DP_MATCH TUNNEL_STATE
+
+%{ for i, t in tunnels ~}
+TUNNEL_VTI[${i+1}]="${t.vti_if}"
+TUNNEL_CUSTOMER_IP[${i+1}]="${t.customer_ip}"
+TUNNEL_RT_TABLE[${i+1}]="${t.rt_table}"
+TUNNEL_HC_PRIO[${i+1}]=$((70 + ${i}))
+TUNNEL_DP_PRIO[${i+1}]=$((80 + ${i}))
+%{ if tunnel_flow_traffic_only == "true" ~}
+TUNNEL_DP_MATCH[${i+1}]="to 162.159.65.1/32"
+%{ else ~}
+TUNNEL_DP_MATCH[${i+1}]="from 192.168.15.0/24"
+%{ endif ~}
+TUNNEL_STATE[${i+1}]="unknown"
+%{ endfor ~}
+
+NUM_TUNNELS=${num_of_tunnels}
+
+remove_rules() {
+  local idx=$$1
+  ip rule del from "$${TUNNEL_CUSTOMER_IP[$$idx]}/32" lookup "$${TUNNEL_RT_TABLE[$$idx]}" priority "$${TUNNEL_HC_PRIO[$$idx]}" 2>/dev/null || true
+  ip rule del $${TUNNEL_DP_MATCH[$$idx]} lookup "$${TUNNEL_RT_TABLE[$$idx]}" priority "$${TUNNEL_DP_PRIO[$$idx]}" 2>/dev/null || true
+}
+
+add_rules() {
+  local idx=$$1
+  ip rule add from "$${TUNNEL_CUSTOMER_IP[$$idx]}/32" lookup "$${TUNNEL_RT_TABLE[$$idx]}" priority "$${TUNNEL_HC_PRIO[$$idx]}" 2>/dev/null || true
+  ip rule add $${TUNNEL_DP_MATCH[$$idx]} lookup "$${TUNNEL_RT_TABLE[$$idx]}" priority "$${TUNNEL_DP_PRIO[$$idx]}" 2>/dev/null || true
+}
+
+while true; do
+  STATUS=$$($$IPSEC_BIN status 2>&1 || true)
+
+  for idx in $$(seq 1 $$NUM_TUNNELS); do
+    if echo "$$STATUS" | grep -q "strongSwan-vpn-IKEv2-$${idx}.*ESTABLISHED"; then
+      if [ "$${TUNNEL_STATE[$$idx]}" != "up" ]; then
+        logger -t "$$LOG_TAG" "Tunnel $${idx} (VTI=$${TUNNEL_VTI[$$idx]}) is ESTABLISHED — ensuring rules are active"
+        ip link set "$${TUNNEL_VTI[$$idx]}" up 2>/dev/null || true
+        add_rules "$$idx"
+        TUNNEL_STATE[$$idx]="up"
+      fi
+    else
+      if [ "$${TUNNEL_STATE[$$idx]}" != "down" ]; then
+        logger -t "$$LOG_TAG" "Tunnel $${idx} (VTI=$${TUNNEL_VTI[$$idx]}) is DOWN — removing rules for WAN fallback"
+        ip link set "$${TUNNEL_VTI[$$idx]}" down 2>/dev/null || true
+        remove_rules "$$idx"
+        TUNNEL_STATE[$$idx]="down"
+      fi
+    fi
+  done
+
+  sleep $$CHECK_INTERVAL
+done
+WATCHDOG
+
+chmod +x /etc/strongswan.d/tunnel-watchdog.sh
+if command -v chcon >/dev/null 2>&1; then
+  chcon -t bin_t /etc/strongswan.d/tunnel-watchdog.sh 2>/dev/null || true
+fi
+
+cat > /etc/systemd/system/tunnel-watchdog.service << 'SVCUNIT'
+[Unit]
+Description=IPsec Tunnel Health Watchdog
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/etc/strongswan.d/tunnel-watchdog.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVCUNIT
+
+systemctl daemon-reload
+systemctl enable --now tunnel-watchdog.service
+
+# ─── 13. Synchronous Operational Health Check Gate ───
 echo "============================================================"
 echo "Terraform Verification: Waiting for IPsec tunnels to establish..."
 echo "============================================================"
