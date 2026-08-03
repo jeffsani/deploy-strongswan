@@ -3,11 +3,6 @@ variable "cloudflare_account_id" {
   description = "Cloudflare Account ID"
 }
 
-variable "cloudflare_internal_account_id" {
-  type        = string
-  description = "The internal numeric Cloudflare Account ID (e.g., 29336597), required for custom FQDN identity schemas. Contact Cloudflare support to obtain this value."
-}
-
 variable "cloudflare_anycast_ip_1" {
   type        = string
   description = "First Cloudflare Magic Transit Anycast IP"

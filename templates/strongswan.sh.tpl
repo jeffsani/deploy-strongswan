@@ -146,7 +146,7 @@ conn strongSwan-vpn-IKEv2-${i+1}
   fragmentation=yes
   leftauth=psk
   left=%any
-  leftid=@vpn${i+1}.${cloudflare_internal_account_id}.custom.ipsec.cloudflare.com
+  leftid=@${t.fqdn_id}
   leftsubnet=0.0.0.0/0
   right=${t.remote_ip}
   rightid=${t.remote_ip}
@@ -165,7 +165,7 @@ EOF
 # ─── 6. Configure /etc/ipsec.secrets ───
 cat > /etc/ipsec.secrets << 'EOF'
 %{ for i, t in tunnels ~}
-@vpn${i+1}.${cloudflare_internal_account_id}.custom.ipsec.cloudflare.com : PSK "${t.psk}"
+@${t.fqdn_id} : PSK "${t.psk}"
 %{ endfor ~}
 EOF
 

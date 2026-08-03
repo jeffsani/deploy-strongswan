@@ -4,6 +4,10 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 5.22"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.4"
+    }
     null = {
       source  = "hashicorp/null"
       version = "~> 3.2"
@@ -64,16 +68,33 @@ resource "cloudflare_magic_wan_ipsec_tunnel" "tunnels" {
   interface_address   = local.tunnel_ips[count.index]
   psk                 = random_password.psk[count.index].result
 
-  custom_remote_identities = {
-    fqdn_id = "vpn${count.index + 1}.${var.cloudflare_internal_account_id}.custom.ipsec.cloudflare.com"
-  }
-
   health_check = {
     enabled   = true
     type      = "request"
     direction = "bidirectional"
     rate      = "mid"
   }
+}
+
+# Retrieve auto-generated FQDN identities from the Cloudflare API
+# The tunnel ID in the URL is only known after apply, so Terraform
+# automatically defers these reads to the apply phase.
+data "http" "tunnel_identity" {
+  count = var.num_of_tunnels
+
+  url = "https://api.cloudflare.com/client/v4/accounts/${var.cloudflare_account_id}/magic/ipsec_tunnels/${cloudflare_magic_wan_ipsec_tunnel.tunnels[count.index].id}"
+
+  request_headers = {
+    Authorization = "Bearer ${var.cloudflare_api_token}"
+    Content-Type  = "application/json"
+  }
+}
+
+locals {
+  tunnel_fqdn_ids = [
+    for i in range(var.num_of_tunnels) :
+    jsondecode(data.http.tunnel_identity[i].response_body).result.ipsec_tunnel.remote_identities.fqdn_id
+  ]
 }
 
 # Remote execution on the instance
@@ -86,17 +107,17 @@ resource "null_resource" "strongswan_install" {
     anycast_ip_2 = trimspace(var.cloudflare_anycast_ip_2)
 
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
-      num_of_tunnels                 = var.num_of_tunnels
-      remote_wan_ip_1                = trimspace(var.remote_wan_ip_1)
-      remote_wan_ip_2                = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
-      cloudflare_internal_account_id = var.cloudflare_internal_account_id
-      tunnel_flow_traffic_only       = var.tunnel_flow_traffic_only
+      num_of_tunnels           = var.num_of_tunnels
+      remote_wan_ip_1          = trimspace(var.remote_wan_ip_1)
+      remote_wan_ip_2          = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
+      tunnel_flow_traffic_only = var.tunnel_flow_traffic_only
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           psk         = random_password.psk[i].result
           local_ip    = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
           remote_ip   = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
           customer_ip = local.customer_ips[i]
+          fqdn_id     = local.tunnel_fqdn_ids[i]
           vti_if      = "vti${i + 1}"
           mark        = 41 + i
           rt_table    = 10 + i
@@ -114,17 +135,17 @@ resource "null_resource" "strongswan_install" {
 
   provisioner "file" {
     content = templatefile("${path.module}/templates/strongswan.sh.tpl", {
-      num_of_tunnels                 = var.num_of_tunnels
-      remote_wan_ip_1                = trimspace(var.remote_wan_ip_1)
-      remote_wan_ip_2                = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
-      cloudflare_internal_account_id = var.cloudflare_internal_account_id
-      tunnel_flow_traffic_only       = var.tunnel_flow_traffic_only
+      num_of_tunnels           = var.num_of_tunnels
+      remote_wan_ip_1          = trimspace(var.remote_wan_ip_1)
+      remote_wan_ip_2          = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
+      tunnel_flow_traffic_only = var.tunnel_flow_traffic_only
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           psk         = random_password.psk[i].result
           local_ip    = i < 2 ? trimspace(var.remote_wan_ip_1) : trimspace(var.remote_wan_ip_2)
           remote_ip   = i % 2 == 0 ? trimspace(var.cloudflare_anycast_ip_1) : trimspace(var.cloudflare_anycast_ip_2)
           customer_ip = local.customer_ips[i]
+          fqdn_id     = local.tunnel_fqdn_ids[i]
           vti_if      = "vti${i + 1}"
           mark        = 41 + i
           rt_table    = 10 + i
