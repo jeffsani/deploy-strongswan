@@ -55,7 +55,6 @@ Cloudflare requires Custom Remote FQDN Identities to match a backend schema inco
 ### 2. Tunnel Interface Subnet Constraints
 The Cloudflare network API strictly validates the inner interface transit address space block provided via `tunnel_interface_prefix_base`.
 * **Private Range Validation:** The target subnet **must** fall inside valid RFC 1918 private blocks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) or Link-Local space (`169.254.0.0/16`).
-* **Example Failure:** Providing a public block such as `172.120.15.2/31` will trigger an immediate `400 Bad Request` from Cloudflare checkers. Use an explicitly private layout like `172.20.15.2/31`.
 
 ### 3. Bidirectional Tunnel Health Probing
 Tunnels utilize **bidirectional health checks** (`type = "request"`). Cloudflare probes the *inner customer-side private IP* directly within the encrypted VTI tunnel. Request-style checks are used because reply-style checks are bounced by the Linux kernel.
