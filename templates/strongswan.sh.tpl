@@ -288,39 +288,39 @@ TUNNEL_STATE[${i+1}]="unknown"
 NUM_TUNNELS=${num_of_tunnels}
 
 remove_rules() {
-  local idx=$$1
-  ip rule del from "$${TUNNEL_CUSTOMER_IP[$$idx]}/32" lookup "$${TUNNEL_RT_TABLE[$$idx]}" priority "$${TUNNEL_HC_PRIO[$$idx]}" 2>/dev/null || true
-  ip rule del $${TUNNEL_DP_MATCH[$$idx]} lookup "$${TUNNEL_RT_TABLE[$$idx]}" priority "$${TUNNEL_DP_PRIO[$$idx]}" 2>/dev/null || true
+  local idx=$1
+  ip rule del from "$${TUNNEL_CUSTOMER_IP[$idx]}/32" lookup "$${TUNNEL_RT_TABLE[$idx]}" priority "$${TUNNEL_HC_PRIO[$idx]}" 2>/dev/null || true
+  ip rule del $${TUNNEL_DP_MATCH[$idx]} lookup "$${TUNNEL_RT_TABLE[$idx]}" priority "$${TUNNEL_DP_PRIO[$idx]}" 2>/dev/null || true
 }
 
 add_rules() {
-  local idx=$$1
-  ip rule add from "$${TUNNEL_CUSTOMER_IP[$$idx]}/32" lookup "$${TUNNEL_RT_TABLE[$$idx]}" priority "$${TUNNEL_HC_PRIO[$$idx]}" 2>/dev/null || true
-  ip rule add $${TUNNEL_DP_MATCH[$$idx]} lookup "$${TUNNEL_RT_TABLE[$$idx]}" priority "$${TUNNEL_DP_PRIO[$$idx]}" 2>/dev/null || true
+  local idx=$1
+  ip rule add from "$${TUNNEL_CUSTOMER_IP[$idx]}/32" lookup "$${TUNNEL_RT_TABLE[$idx]}" priority "$${TUNNEL_HC_PRIO[$idx]}" 2>/dev/null || true
+  ip rule add $${TUNNEL_DP_MATCH[$idx]} lookup "$${TUNNEL_RT_TABLE[$idx]}" priority "$${TUNNEL_DP_PRIO[$idx]}" 2>/dev/null || true
 }
 
 while true; do
-  STATUS=$$($$IPSEC_BIN status 2>&1 || true)
+  STATUS=$($IPSEC_BIN status 2>&1 || true)
 
-  for idx in $$(seq 1 $$NUM_TUNNELS); do
-    if echo "$$STATUS" | grep -q "strongSwan-vpn-IKEv2-$${idx}.*ESTABLISHED"; then
-      if [ "$${TUNNEL_STATE[$$idx]}" != "up" ]; then
-        logger -t "$$LOG_TAG" "Tunnel $${idx} (VTI=$${TUNNEL_VTI[$$idx]}) is ESTABLISHED — ensuring rules are active"
-        ip link set "$${TUNNEL_VTI[$$idx]}" up 2>/dev/null || true
-        add_rules "$$idx"
-        TUNNEL_STATE[$$idx]="up"
+  for idx in $(seq 1 $NUM_TUNNELS); do
+    if echo "$STATUS" | grep -q "strongSwan-vpn-IKEv2-$${idx}.*ESTABLISHED"; then
+      if [ "$${TUNNEL_STATE[$idx]}" != "up" ]; then
+        logger -t "$LOG_TAG" "Tunnel $${idx} (VTI=$${TUNNEL_VTI[$idx]}) is ESTABLISHED — ensuring rules are active"
+        ip link set "$${TUNNEL_VTI[$idx]}" up 2>/dev/null || true
+        add_rules "$idx"
+        TUNNEL_STATE[$idx]="up"
       fi
     else
-      if [ "$${TUNNEL_STATE[$$idx]}" != "down" ]; then
-        logger -t "$$LOG_TAG" "Tunnel $${idx} (VTI=$${TUNNEL_VTI[$$idx]}) is DOWN — removing rules for WAN fallback"
-        ip link set "$${TUNNEL_VTI[$$idx]}" down 2>/dev/null || true
-        remove_rules "$$idx"
-        TUNNEL_STATE[$$idx]="down"
+      if [ "$${TUNNEL_STATE[$idx]}" != "down" ]; then
+        logger -t "$LOG_TAG" "Tunnel $${idx} (VTI=$${TUNNEL_VTI[$idx]}) is DOWN — removing rules for WAN fallback"
+        ip link set "$${TUNNEL_VTI[$idx]}" down 2>/dev/null || true
+        remove_rules "$idx"
+        TUNNEL_STATE[$idx]="down"
       fi
     fi
   done
 
-  sleep $$CHECK_INTERVAL
+  sleep $CHECK_INTERVAL
 done
 WATCHDOG
 
