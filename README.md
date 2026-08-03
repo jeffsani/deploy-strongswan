@@ -85,32 +85,41 @@ The deployment includes two complementary mechanisms that ensure data-plane traf
 
 ## Diagnostics & Monitoring
 
+> All commands below require `sudo` unless you are running as root.
+
 ### Tunnel SA Status
 View the current IKE/CHILD_SA state for all tunnels:
 ```bash
-ipsec status
+sudo ipsec status
 ```
 
 For detailed output including rekey timers, SA lifetimes, and byte counters:
 ```bash
-swanctl --list-sas
+sudo swanctl --list-sas
 ```
 
 ### Watchdog Health Probe Log
-The tunnel watchdog service continuously probes each tunnel's SA state every 15 seconds and logs transitions to syslog. View the full log history:
+The `tunnel-watchdog` service continuously probes each tunnel's SA state every 15 seconds and logs state transitions to syslog. Check the service is running:
 ```bash
-journalctl -t tunnel-watchdog
+sudo systemctl status tunnel-watchdog.service
+```
+
+View the full log history:
+```bash
+sudo journalctl -t tunnel-watchdog
 ```
 
 Follow state changes in real time:
 ```bash
-journalctl -t tunnel-watchdog -f
+sudo journalctl -t tunnel-watchdog -f
 ```
+
+> **Note:** The watchdog only logs on **state transitions** (e.g., a tunnel going from UP to DOWN or vice versa). If all tunnels have been stable since the service started, the log will be empty. A quiet log means no failover events have occurred.
 
 ### Policy Routing Rules
 Inspect the active `ip rule` entries to verify which tunnels have their data-plane steering rules installed:
 ```bash
-ip rule show
+sudo ip rule show
 ```
 When a tunnel is healthy, you should see its priority 70+ (health-check pinning) and priority 80+ (data-plane steering) rules present. When a tunnel is down, these rules are removed to allow WAN fallback.
 
@@ -123,5 +132,5 @@ ip -brief link show type vti
 ### strongSwan Daemon Logs
 For deep debugging of IKE negotiation, DPD events, and SA lifecycle:
 ```bash
-journalctl -u strongswan -f
+sudo journalctl -u strongswan -f
 ```
