@@ -46,3 +46,8 @@ health_check_targets = []
 # health_check_targets = ["10.0.0.5", "10.0.0.5"] 
 # Example for 4 tunnels behind NAT:
 # health_check_targets = ["10.0.0.5", "10.0.0.5", "10.0.1.5", "10.0.1.5"]
+
+# If true, only sFlow/NetFlow traffic (to 162.159.65.1) is routed through
+# the tunnels. If false (default), all traffic from 192.168.15.0/24 is
+# routed through the tunnels as the default gateway.
+# tunnel_flow_traffic_only = false
