@@ -146,6 +146,25 @@ Check whether each VTI interface is up or down:
 ip -brief link show type vti
 ```
 
+### Network Flow SNAT Verification
+When `tunnel_flow_traffic_only = true` and `tunnel_flow_nat_ip` is set, verify the SNAT rules are active and firing:
+
+Check the iptables NAT rules and their packet/byte counters:
+```bash
+sudo iptables -t nat -L POSTROUTING -v -n
+```
+Non-zero counters on the SNAT rules confirm NAT is active.
+
+Capture NATed flow traffic on the VTI interfaces to verify the source IP is rewritten:
+```bash
+sudo tcpdump -i vti1 -n udp port 2055 or udp port 6343
+```
+
+To monitor both tunnels simultaneously:
+```bash
+sudo tcpdump -i any -n udp port 2055 or udp port 6343
+```
+
 ### strongSwan Daemon Logs
 For deep debugging of IKE negotiation, DPD events, and SA lifecycle:
 ```bash
