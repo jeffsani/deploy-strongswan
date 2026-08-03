@@ -94,7 +94,9 @@ tunnel_flow_traffic_only = true
 tunnel_flow_nat_ip       = "203.0.113.10"  # Must be within your Magic Transit protected prefix
 ```
 
-When `tunnel_flow_traffic_only = false` (the default Magic WAN / Zero Trust use case), no SNAT rules are created. To verify the NAT rules are active:
+The module also binds `tunnel_flow_nat_ip` as a `/32` address on the loopback interface and creates `cloudflare_magic_wan_static_route` resources that point this prefix back through each IPsec tunnel. This ensures Cloudflare can route return traffic (e.g. ICMP echo replies) back to the StrongSwan host and the kernel accepts it locally.
+
+When `tunnel_flow_traffic_only = false` (the default Magic WAN / Zero Trust use case), no SNAT rules or static routes are created. To verify the NAT rules are active:
 ```bash
 sudo iptables -t nat -L POSTROUTING -v -n
 ```

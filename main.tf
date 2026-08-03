@@ -97,14 +97,29 @@ locals {
   ]
 }
 
+# Static route so Cloudflare knows how to send return traffic (e.g. ICMP
+# replies) back to the tunnel_flow_nat_ip through each IPsec tunnel.
+resource "cloudflare_magic_wan_static_route" "flow_nat_return" {
+  count = var.tunnel_flow_traffic_only && var.tunnel_flow_nat_ip != null ? var.num_of_tunnels : 0
+
+  account_id  = var.cloudflare_account_id
+  prefix      = "${var.tunnel_flow_nat_ip}/32"
+  nexthop     = local.customer_ips[count.index]
+  priority    = 100
+  description = "Return route for flow NAT IP via tunnel ${count.index + 1}"
+
+  depends_on = [cloudflare_magic_wan_ipsec_tunnel.tunnels]
+}
+
 # Remote execution on the instance
 resource "null_resource" "strongswan_install" {
   triggers = {
     remote_ip    = trimspace(var.remote_wan_ip_1)
     ssh_user     = var.ssh_user
     private_key  = var.ssh_private_key
-    anycast_ip_1 = trimspace(var.cloudflare_anycast_ip_1)
-    anycast_ip_2 = trimspace(var.cloudflare_anycast_ip_2)
+    anycast_ip_1     = trimspace(var.cloudflare_anycast_ip_1)
+    anycast_ip_2     = trimspace(var.cloudflare_anycast_ip_2)
+    flow_nat_ip      = var.tunnel_flow_nat_ip != null ? var.tunnel_flow_nat_ip : ""
 
     template_checksum = md5(templatefile("${path.module}/templates/strongswan.sh.tpl", {
       num_of_tunnels           = var.num_of_tunnels
@@ -199,6 +214,7 @@ resource "null_resource" "strongswan_install" {
       "sudo rm -f /etc/systemd/system/tunnel-watchdog.service 2>/dev/null || true",
       "sudo systemctl daemon-reload 2>/dev/null || true",
       "sudo iptables -t nat -F POSTROUTING 2>/dev/null || true",
+      "if [ -n '${lookup(self.triggers, "flow_nat_ip", "")}' ]; then sudo ip addr del ${lookup(self.triggers, "flow_nat_ip", "")}/32 dev lo 2>/dev/null || true; fi",
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
       "sudo rm -f /etc/modules-load.d/ip_vti.conf 2>/dev/null || true",

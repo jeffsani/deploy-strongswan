@@ -254,6 +254,9 @@ iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss
 
 %{ if tunnel_flow_traffic_only && tunnel_flow_nat_ip != "" ~}
 # ─── 10b. Source NAT for Network Flow Traffic ───
+# Bind the NAT IP to loopback so the kernel accepts return traffic (e.g. ICMP replies)
+# routed back through the tunnels by Cloudflare's static route for this prefix.
+ip addr replace ${tunnel_flow_nat_ip}/32 dev lo
 # SNAT NetFlow/IPFIX (UDP 2055) and sFlow (UDP 6343) to the customer's
 # Magic Transit protected prefix IP so Cloudflare accepts the flow data.
 iptables -t nat -D POSTROUTING -d 162.159.65.1/32 -p udp --dport 2055 -j SNAT --to-source ${tunnel_flow_nat_ip} 2>/dev/null || true
