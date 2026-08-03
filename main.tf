@@ -111,6 +111,7 @@ resource "null_resource" "strongswan_install" {
       remote_wan_ip_1          = trimspace(var.remote_wan_ip_1)
       remote_wan_ip_2          = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       tunnel_flow_traffic_only = var.tunnel_flow_traffic_only
+      tunnel_flow_nat_ip       = var.tunnel_flow_nat_ip != null ? var.tunnel_flow_nat_ip : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           psk         = random_password.psk[i].result
@@ -139,6 +140,7 @@ resource "null_resource" "strongswan_install" {
       remote_wan_ip_1          = trimspace(var.remote_wan_ip_1)
       remote_wan_ip_2          = var.remote_wan_ip_2 != null ? trimspace(var.remote_wan_ip_2) : ""
       tunnel_flow_traffic_only = var.tunnel_flow_traffic_only
+      tunnel_flow_nat_ip       = var.tunnel_flow_nat_ip != null ? var.tunnel_flow_nat_ip : ""
       tunnels = [
         for i in range(var.num_of_tunnels) : {
           psk         = random_password.psk[i].result
@@ -196,6 +198,7 @@ resource "null_resource" "strongswan_install" {
       "sudo systemctl disable tunnel-watchdog.service 2>/dev/null || true",
       "sudo rm -f /etc/systemd/system/tunnel-watchdog.service 2>/dev/null || true",
       "sudo systemctl daemon-reload 2>/dev/null || true",
+      "sudo iptables -t nat -F POSTROUTING 2>/dev/null || true",
       "sudo iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true",
       "sudo rm -rf /etc/ipsec.conf /etc/ipsec.secrets /etc/strongswan.conf /etc/strongswan.d/",
       "sudo rm -f /etc/modules-load.d/ip_vti.conf 2>/dev/null || true",

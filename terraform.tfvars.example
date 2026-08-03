@@ -51,3 +51,8 @@ health_check_targets = []
 # the tunnels. If false (default), all traffic from 192.168.15.0/24 is
 # routed through the tunnels as the default gateway.
 # tunnel_flow_traffic_only = false
+
+# When tunnel_flow_traffic_only = true, flow traffic (NetFlow/IPFIX on UDP
+# 2055 and sFlow on UDP 6343) must appear to originate from a customer-owned
+# Magic Transit protected prefix IP. Set this to an IP within your prefix.
+# tunnel_flow_nat_ip = "203.0.113.10"

@@ -81,6 +81,23 @@ The deployment includes two complementary mechanisms that ensure data-plane traf
 
 > **Note:** There is a brief black-hole window (up to ~30-150 seconds) between when a tunnel actually fails and when DPD detects the failure and triggers the updown script. The watchdog's 15-second poll interval provides a secondary detection path. To monitor failover events, check syslog: `journalctl -t tunnel-watchdog`.
 
+### 5. Source NAT for Magic Transit Network Flow Collection
+When `tunnel_flow_traffic_only = true`, the tunnels are used exclusively to encrypt outbound network flow telemetry (NetFlow/IPFIX and sFlow) to the Cloudflare flow collector at `162.159.65.1`. In this mode, Cloudflare expects flow traffic to originate from a customer-owned **Magic Transit protected prefix** IP.
+
+Set `tunnel_flow_nat_ip` to an IP within your protected prefix. The module will install iptables SNAT rules in the `nat` POSTROUTING chain to rewrite the source address of:
+* **NetFlow/IPFIX:** UDP destination port 2055
+* **sFlow:** UDP destination port 6343
+
+```hcl
+tunnel_flow_traffic_only = true
+tunnel_flow_nat_ip       = "203.0.113.10"  # Must be within your Magic Transit protected prefix
+```
+
+When `tunnel_flow_traffic_only = false` (the default Magic WAN / Zero Trust use case), no SNAT rules are created. To verify the NAT rules are active:
+```bash
+sudo iptables -t nat -L POSTROUTING -v -n
+```
+
 ---
 
 ## Diagnostics & Monitoring

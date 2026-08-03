@@ -68,3 +68,9 @@ variable "tunnel_flow_traffic_only" {
   description = "If true, only network flow logging traffic (sFlow/NetFlow to 162.159.65.1) is directed through the tunnels. If false, the tunnels act as the default gateway for the 192.168.15.0/24 LAN network."
   default     = false
 }
+
+variable "tunnel_flow_nat_ip" {
+  type        = string
+  description = "Source NAT IP for network flow traffic (NetFlow/IPFIX and sFlow). Must be an IP within the customer's Magic Transit protected prefix. Required when tunnel_flow_traffic_only = true."
+  default     = null
+}

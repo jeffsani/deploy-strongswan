@@ -252,6 +252,16 @@ fi
 iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387 2>/dev/null || true
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1387
 
+%{ if tunnel_flow_traffic_only && tunnel_flow_nat_ip != "" ~}
+# ─── 10b. Source NAT for Network Flow Traffic ───
+# SNAT NetFlow/IPFIX (UDP 2055) and sFlow (UDP 6343) to the customer's
+# Magic Transit protected prefix IP so Cloudflare accepts the flow data.
+iptables -t nat -D POSTROUTING -d 162.159.65.1/32 -p udp --dport 2055 -j SNAT --to-source ${tunnel_flow_nat_ip} 2>/dev/null || true
+iptables -t nat -D POSTROUTING -d 162.159.65.1/32 -p udp --dport 6343 -j SNAT --to-source ${tunnel_flow_nat_ip} 2>/dev/null || true
+iptables -t nat -A POSTROUTING -d 162.159.65.1/32 -p udp --dport 2055 -j SNAT --to-source ${tunnel_flow_nat_ip}
+iptables -t nat -A POSTROUTING -d 162.159.65.1/32 -p udp --dport 6343 -j SNAT --to-source ${tunnel_flow_nat_ip}
+%{ endif ~}
+
 # ─── 11. Boot strongSwan Daemon ───
 IPSEC_BIN=$(command -v ipsec || echo "/usr/local/sbin/ipsec")
 $IPSEC_BIN stop || true
